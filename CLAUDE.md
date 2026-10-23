@@ -39,6 +39,8 @@ codeguard/            Python engine, stdlib only at runtime
   injection.py + textclf.py ai_targeted_instructions: phrase rules, then a local TF-IDF+LR text classifier
   ml.py               stacker (LR over the other layers' signals); only consulted when risk is 0.3–0.7, acts only if >=0.9 sure
   guard.py            @codeguard decorator (interception, fails closed)
+  heal.py             self-healing loop: HealingSession.run(task, generate, execute); bounded retries, stricter retry
+                      threshold, evasion/resubmit escalation, session lockout, redacted feedback. Tests: eval/heal_tests.py
   api.py              HTTP: POST /analyze, POST /analyze/batch, GET /health (stdlib server; FastAPI if installed)
   data/*.txt          package lists (top-15k PyPI; DataDog malicious/compromised names). Shipped, needed at runtime.
 models/               injection.json (~650 KB), stacker.json (~1 KB). Shipped, needed at runtime.
@@ -65,7 +67,8 @@ cd ui && npm install && npm run dev        # http://localhost:3000
 Short forms from the repo root (`package.json` → `scripts/tasks.js`, Node stdlib only): `npm start` (engine + UI),
 `npm run demo`, `npm run check`, `npm run safe` / `unsafe`, `npm run scan -- <paths|-c code>`, `npm run i`. Table in README.md.
 Before you call a change done, re-run: regressions, holdout, `data/external/benign_oss.jsonl` (false-positive guard),
-`data/external/guarddog.jsonl`, `eval/carrier_test.py`, and both demos.
+`data/external/guarddog.jsonl`, `eval/carrier_test.py`, `eval/heal_tests.py`, `plugin/test_hook.py`, and the three demos
+(`intercept_check.py`, `cli_gate_check.py`, `heal_check.py`).
 
 ## Current numbers (baseline to compare against)
 | Check | Value |

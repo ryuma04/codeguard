@@ -29,6 +29,27 @@ python -m codeguard some_file.py          # CLI, exit code 2 on block
 | `npm run check` | regressions + holdout |
 | `npm run build` / `health` / `bench` / `cg -- <any CLI args>` | build the CLI, ping the engine, latency, raw CLI |
 
+### Self-healing agent loop (`codeguard/heal.py`)
+When the guard blocks code, the agent gets structured feedback (categories, flagged lines, a fix hint per
+category) and may try again. Only the exact string that was checked is ever executed.
+```python
+from codeguard import HealingSession
+result = HealingSession().run(task, generate, execute)  # generate(task, feedback) -> code; execute(code)
+# result.status: ok | healed | escalated | locked | guard_error | agent_error | gave_up | exec_failed
+```
+Limits stop an agent from using the guard as an oracle to learn evasions:
+- at most 3 attempts per task;
+- retries face a stricter threshold (0.4);
+- resubmitting identical blocked code, or obfuscating after a block, escalates at once;
+- a session-wide block budget locks the session;
+- the guard down means nothing runs.
+
+Feedback never reveals detection rules. Lines carrying `ai_targeted_instructions` are redacted, so a blocked
+injection is not fed back into the agent. Proof: `npm run heal` (`demo/heal_check.py`): the scripted agent's
+first attempt is the unsafe demo snippet, which is blocked and never runs; the fixed one runs.
+Edge cases: `python eval/heal_tests.py` (26 checks). The same protections run in the Claude Code hook below,
+where the agent is a real model.
+
 ### Claude Code plugin (`plugin/`): live interception inside a real agent
 A `PreToolUse` hook checks every command, script run and file write Claude Code is about to make against this engine,
 denies malicious ones before they run, and returns the reason so Claude fixes its own code (bounded retries,

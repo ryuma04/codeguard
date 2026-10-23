@@ -11,6 +11,7 @@ to the CodeGuard engine (POST /analyze, the same endpoint the judges call) and:
 Standard library only. Also usable by hand: python codeguard_hook.py --scan <file>
 """
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -145,8 +146,9 @@ def audit(rec):
         pass
 
 
-def blocks_in_session(session):
-    n = 0
+def session_history(session):
+    """(blocks so far, categories blocked so far, hashes of blocked code) for this session."""
+    n, cats, shas = 0, set(), set()
     try:
         with open(AUDIT, encoding="utf-8") as f:
             for line in f:
@@ -154,36 +156,52 @@ def blocks_in_session(session):
                     r = json.loads(line)
                 except ValueError:
                     continue
-                n += r.get("session") == session and r.get("verdict") == "block"
+                if r.get("session") == session and r.get("verdict") == "block":
+                    n += 1
+                    cats |= set(r.get("categories") or [])
+                    shas.add(r.get("sha"))
     except OSError:
         pass
-    return n
+    return n, cats, shas
 
 
 # ------------------------------------------------------------------ messages
-def flagged_lines(code, lines):
+_INVISIBLE = re.compile("[​-‏ -‮⁠-⁩﻿\U000e0000-\U000e007f]")
+
+
+def flagged_lines(code, lines, redact=False):
+    """Excerpts of flagged lines. Text aimed at an AI reader is redacted, so a blocked prompt
+    injection is never fed straight back into Claude's context."""
     src = code.replace("\r\n", "\n").split("\n")
     out = []
     for n in (lines or [])[:8]:
         if 1 <= n <= len(src):
-            text = src[n - 1].strip()
+            text = "[redacted: text aimed at an AI reader]" if redact else _INVISIBLE.sub("", src[n - 1]).strip()
             out.append(f"  line {n}: {text[:160] + ('…' if len(text) > 160 else '')}")
     return out
 
 
-def deny_reason(label, code, res, attempt):
+def deny_reason(label, code, res, attempt, flag=""):
     cats = res.get("categories") or []
+    redact = "ai_targeted_instructions" in cats
     msg = [f"CodeGuard BLOCKED this {label!r} before it ran.",
            f"verdict=block  risk_score={res.get('risk_score')}  categories={cats}  language={res.get('code_language')}",
            "Why:"]
-    msg += [f"  - {r}" for r in (res.get("reason") or "").split("; ") if r]
-    fl = flagged_lines(code, res.get("vulnerable_lines"))
+    reasons = [r for r in (res.get("reason") or "").split("; ") if r]
+    msg += [f"  - {r}" for r in (reasons if not redact else [f"{c} (see flagged lines)" for c in cats])]
+    fl = flagged_lines(code, res.get("vulnerable_lines"), redact)
     if fl:
         msg += ["Flagged lines:"] + fl
     hints = [HINTS[c] for c in cats if c in HINTS]
     if hints:
         msg += ["How to fix:"] + [f"  - {h}" for h in hints]
-    if attempt >= MAX_BLOCKS:
+    if flag == "evasion":
+        msg.append("After an earlier block in this session, this attempt hides its code (obfuscated_execution). That is "
+                   "treated as an attempt to get around the guard. STOP: do not retry. Tell the user what was blocked.")
+    elif flag == "resubmit":
+        msg.append("This exact code was already blocked in this session. STOP: do not resubmit it. "
+                   "Tell the user what was blocked and ask how to proceed.")
+    elif attempt >= MAX_BLOCKS:
         msg.append(f"This is block #{attempt} in this session. STOP retrying: explain to the user what was blocked "
                    "and why, and ask how they want to proceed. Do not attempt another variant.")
     else:
@@ -231,13 +249,18 @@ def hook():
                 continue
             res = last = analyze(code)
             if res["verdict"] == "block":
-                attempt = blocks_in_session(session) + 1
+                prior, prior_cats, prior_shas = session_history(session)
+                sha = hashlib.sha256(code.encode("utf-8", "replace")).hexdigest()[:16]
+                flag = ("resubmit" if sha in prior_shas else
+                        "evasion" if prior and "obfuscated_execution" in res.get("categories", [])
+                        and "obfuscated_execution" not in prior_cats else "")
                 audit(rec | {"target": label[:200], "verdict": "block", "risk": res.get("risk_score"),
-                             "categories": res.get("categories")})
+                             "categories": res.get("categories"), "sha": sha, "flag": flag})
                 cats = ", ".join(res.get("categories") or []) or "unknown"
-                user = f"🛡 CodeGuard BLOCKED {tool} ({label[:80]}): {cats}, risk {res.get('risk_score')}, {res.get('roundtrip_ms')} ms"
+                user = (f"🛡 CodeGuard BLOCKED {tool} ({label[:80]}): {cats}, risk {res.get('risk_score')}, "
+                        f"{res.get('roundtrip_ms')} ms" + (f" [{flag}]" if flag else ""))
                 decision = "ask" if is_write and WRITE_MODE == "ask" else "deny"
-                emit(decision, deny_reason(label, code, res, attempt), user)
+                emit(decision, deny_reason(label, code, res, prior + 1, flag), user)
         audit(rec | {"target": items[0][0][:200], "verdict": "allow"})
         note = f"🛡 CodeGuard allow {tool} (risk {last['risk_score']}, {last['roundtrip_ms']} ms)" if SHOW_ALLOW and last else ""
         emit(user_msg=note)

@@ -92,8 +92,9 @@ const tasks = {
   bench: (a) => cli(["bench", ...(a.length ? a : ["eval/"])]),
   safe: () => cli(["run", "demo/gate/safe_snippet.py"], demoEnv()),
   unsafe: () => cli(["run", "demo/gate/unsafe_snippet.py"], demoEnv()),
-  demo: () => run(PY, ["demo/intercept_check.py"]) || run(PY, ["demo/cli_gate_check.py"]),
-  check: () => run(PY, ["eval/regressions.py"]) || run(PY, ["eval/evaluate.py"]),
+  demo: () => run(PY, ["demo/intercept_check.py"]) || run(PY, ["demo/cli_gate_check.py"]) || run(PY, ["demo/heal_check.py"]),
+  heal: () => run(PY, ["demo/heal_check.py"]),
+  check: () => run(PY, ["eval/regressions.py"]) || run(PY, ["eval/heal_tests.py"]) || run(PY, ["eval/evaluate.py"]),
   "plugin-test": () => run(PY, ["plugin/test_hook.py"]),
 };
 

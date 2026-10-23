@@ -8,6 +8,7 @@
     "ui": "node scripts/tasks.js ui",
     "build": "node scripts/tasks.js build",
     "demo": "node scripts/tasks.js demo",
+    "heal": "node scripts/tasks.js heal",
     "safe": "node scripts/tasks.js safe",
     "unsafe": "node scripts/tasks.js unsafe",
     "scan": "node scripts/tasks.js scan",
