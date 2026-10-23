@@ -21,12 +21,23 @@ python -m codeguard some_file.py          # CLI, exit code 2 on block
 | `npm run engine` / `npm run ui` | one of them |
 | `npm run demo` | both interception proofs (decorator + Go gate) |
 | `npm run safe` / `npm run unsafe` | gate one half of the demo pair live |
-| `npm run scan -- <files, folders or globs>` | one line per file + summary |
+| `npm run scan -- path/to/file.py` | full verdict card for one file (never runs it): risk bar, reasons, category scores, flagged lines |
+| `npm run scan -- <files, folders or globs>` | one line per file + summary; add `-v` for a card per file |
 | `npm run scan -- -c "rm -rf /"` | scan inline code |
-| `npm run gate -- file.py` | run a file (python/bash/node/powershell by extension) only if allowed |
+| `npm run gate -- file.py` | verdict card, then run the file (python/bash/node/powershell by extension) only if allowed |
 | `npm run i` | interactive: paste a snippet and end it with `.`, or type a path; repeat |
 | `npm run check` | regressions + holdout |
 | `npm run build` / `health` / `bench` / `cg -- <any CLI args>` | build the CLI, ping the engine, latency, raw CLI |
+
+### Claude Code plugin (`plugin/`): live interception inside a real agent
+A `PreToolUse` hook checks every command, script run and file write Claude Code is about to make against this engine,
+denies malicious ones before they run, and returns the reason so Claude fixes its own code (bounded retries,
+fail closed, audit log). Install, the judging demo script and the multi-agent design: [plugin/README.md](plugin/README.md).
+```bash
+npm run engine                 # terminal 1
+claude --plugin-dir ./plugin   # terminal 2, then e.g. "Follow the setup steps in demo/claude/SETUP.md"
+npm run plugin-test            # the hook's own checks, no Claude needed
+```
 
 **Step-by-step manual checks: [MANUAL_TESTING.md](MANUAL_TESTING.md).**
 

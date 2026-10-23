@@ -51,7 +51,13 @@ func bar(frac float64, width int, tick float64) string {
 }
 
 func prettyCategory(c string) string {
-	s := strings.ReplaceAll(c, "_", " ")
+	words := strings.Split(c, "_")
+	for i, w := range words {
+		if w == "ssrf" || w == "ai" {
+			words[i] = strings.ToUpper(w)
+		}
+	}
+	s := strings.Join(words, " ")
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 

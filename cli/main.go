@@ -123,26 +123,10 @@ func readSource(path string) (string, error) {
 	return string(b), err
 }
 
-func printVerdict(v *Verdict, asJSON bool) {
-	if asJSON {
-		out, _ := json.MarshalIndent(v, "", "  ")
-		fmt.Println(string(out))
-		return
-	}
-	mark := "ALLOW"
-	if v.Verdict == "block" {
-		mark = "BLOCK"
-	}
-	fmt.Printf("%s  risk=%.2f  lang=%s  latency=%.1fms\n", mark, v.RiskScore, v.CodeLanguage, v.LatencyMS)
-	if len(v.Categories) > 0 {
-		fmt.Printf("  categories: %s\n", strings.Join(v.Categories, ", "))
-	}
-	if len(v.VulnerableLines) > 0 {
-		fmt.Printf("  lines: %v\n", v.VulnerableLines)
-	}
-	if v.Reason != "" {
-		fmt.Printf("  reason: %s\n", v.Reason)
-	}
+// printJSON prints the schema response; the human-readable view is printCard (card.go).
+func printJSON(v *Verdict) {
+	out, _ := json.MarshalIndent(v, "", "  ")
+	fmt.Println(string(out))
 }
 
 // ---------------------------------------------------------------- scan
@@ -179,7 +163,7 @@ func cmdScan(args []string) int {
 		if card {
 			printCard(os.Stdout, paletteFor(os.Stdout), v, code, name)
 		} else {
-			printVerdict(v, true)
+			printJSON(v)
 		}
 		if v.Verdict == "block" {
 			return exitBlock

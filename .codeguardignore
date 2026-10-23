@@ -1,0 +1,11 @@
+# CodeGuard plugin: file WRITES under these paths are not scanned (running code is always scanned).
+# This repository is a security tool, so its rules, tests and docs contain attack strings on purpose.
+codeguard/
+eval/
+data/
+demo/
+cli/
+ui/
+plugin/
+scripts/
+*.md

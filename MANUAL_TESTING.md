@@ -10,7 +10,8 @@ npm start                         # engine + UI (Ctrl+C stops both)
 npm run demo                      # both interception proofs, must print PASS twice
 npm run safe                      # live: allowed, runs
 npm run unsafe                    # live: BLOCKED, never started
-npm run scan -- samples/          # a whole folder of snippets, one line each
+npm run scan -- path/to/file.py   # one file: full verdict card (risk bar, reasons, categories, flagged lines)
+npm run scan -- samples/          # a whole folder of snippets, one line each (add -v for full cards)
 npm run i                         # paste snippets one after another (end each with a "." line)
 ```
 

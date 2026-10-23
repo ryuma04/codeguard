@@ -85,6 +85,7 @@ RULES = [
 
     # ---------------- dependency_risk ----------------
     ("dependency_risk", T, 0.85, r"\b(curl|wget)\b[^\n]*\|\s*(sudo\s+)?(ba|z|da)?sh\b|\b(bash|sh)\s+<\(\s*(curl|wget)", "pipes a remote script into the shell"),
+    ("dependency_risk", T, 0.85, r"\b(iwr|irm|curl|wget|Invoke-WebRequest|Invoke-RestMethod|DownloadString)\b[^\n]*\|\s*(iex|Invoke-Expression)\b|\b(iex|Invoke-Expression)\b[^\n]*\b(iwr|irm|Invoke-WebRequest|Invoke-RestMethod|DownloadString)\b", "downloads a remote script and runs it (PowerShell)"),
     ("dependency_risk", T, 0.70, r"\bpip3?\s+install\b[^\n]*(https?://(?!files\.pythonhosted|pypi\.org)|git\+http|\d{1,3}(\.\d{1,3}){3})", "installs a package from an untrusted URL"),
     ("dependency_risk", T, 0.60, r"--trusted-host|--extra-index-url\s+http://|--index-url\s+http://|npm\s+(i|install)\s+[^\n]*https?://|registry\s*=\s*http://|--allow-unauthenticated|--no-check-certificate|--insecure\b|-k\s+https?://", "disables package/TLS integrity checks"),
     ("dependency_risk", T, 0.65, r"(wget|curl)[^\n]*(-o|-O|>)\s*\S+[^\n]*(&&|;)\s*(chmod\s+\+x|\./|sh\s|bash\s|python\s)", "downloads then executes a binary"),

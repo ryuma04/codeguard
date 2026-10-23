@@ -44,6 +44,9 @@ codeguard/            Python engine, stdlib only at runtime
 models/               injection.json (~650 KB), stacker.json (~1 KB). Shipped, needed at runtime.
 cli/                  Go CLI: scan / exec / bench / health (stdlib only; build: cd cli && go build -o codeguard.exe .)
 ui/                   Next.js 16 + React 19 web UI, plain JSX/CSS styled per design.md; /api/analyze proxies to the engine
+plugin/               Claude Code plugin: PreToolUse hook (hooks/codeguard_hook.py, stdlib) gates Bash/PowerShell/Write/Edit via
+                      POST /analyze; fails closed; test: python plugin/test_hook.py. Marketplace: .claude-plugin/marketplace.json.
+                      .codeguardignore lists this repo's own attack-string files so writes to them aren't blocked.
 demo/                 intercept_check.py (decorator proof), cli_gate_check.py (Go gate proof), gate/ (the demo pair)
 eval/                 evaluate.py, holdout.py (76 hand-written cases), external.py (third-party test sets), carrier_test.py,
                       regressions.py, train_injection.py, train_ml.py, build_pkg_lists.py

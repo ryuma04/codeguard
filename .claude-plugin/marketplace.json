@@ -1,0 +1,15 @@
+{
+  "name": "codeguard",
+  "description": "CodeGuard: real-time pre-execution safety layer for AI-generated code.",
+  "owner": {
+    "name": "CodeGuard team"
+  },
+  "plugins": [
+    {
+      "name": "codeguard",
+      "description": "Blocks malicious commands, scripts and file writes before Claude runs them, using the local CodeGuard engine.",
+      "source": "./plugin",
+      "category": "security"
+    }
+  ]
+}

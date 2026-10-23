@@ -16,6 +16,7 @@
     "health": "node scripts/tasks.js health",
     "bench": "node scripts/tasks.js bench",
     "check": "node scripts/tasks.js check",
+    "plugin-test": "node scripts/tasks.js plugin-test",
     "cg": "node scripts/tasks.js cg"
   }
 }

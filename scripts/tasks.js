@@ -94,6 +94,7 @@ const tasks = {
   unsafe: () => cli(["run", "demo/gate/unsafe_snippet.py"], demoEnv()),
   demo: () => run(PY, ["demo/intercept_check.py"]) || run(PY, ["demo/cli_gate_check.py"]),
   check: () => run(PY, ["eval/regressions.py"]) || run(PY, ["eval/evaluate.py"]),
+  "plugin-test": () => run(PY, ["plugin/test_hook.py"]),
 };
 
 (async () => {
