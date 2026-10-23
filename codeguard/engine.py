@@ -182,6 +182,17 @@ def features(code):
     return ml.featurize(ctx.code, ctx.language, ctx.findings, ctx.decoded_layers)
 
 
+def warmup():
+    """Load models and package lists before serving, so the first live request
+    does not pay the one-off load (~650 KB model + ~48k package names)."""
+    from .analyzers.structured import _load_lists
+    from . import textclf
+    _load_lists()
+    textclf.available()
+    ml.available()
+    analyze("import os\n# warm-up\nprint(os.getcwd())")
+
+
 def analyze(code, threshold: float = BLOCK_THRESHOLD) -> dict:
     t0 = time.perf_counter()
     ctx, per_cat = run_layers(code)
@@ -194,7 +205,10 @@ def analyze(code, threshold: float = BLOCK_THRESHOLD) -> dict:
     if verdict == "block" and not cats and per_cat:  # model tipped it over: report the strongest signal
         cats = [max(per_cat, key=per_cat.get)]
 
-    threats = sorted({x.key(): x for x in ctx.findings if x.category in cats and (x.kind == THREAT or ml_prob is not None)}.values(),
+    # Weak capability notes only explain a block when the model, not the rules, decided it
+    # (rule score below the threshold, model pushed it over). Otherwise list threats only.
+    model_decided = rule_risk < threshold <= risk
+    threats = sorted({x.key(): x for x in ctx.findings if x.category in cats and (x.kind == THREAT or model_decided)}.values(),
                      key=lambda x: -x.weight)
     if verdict == "block":
         uniq = list({(x.category, x.reason.replace(" (hidden in base64)", "")): x for x in threats}.values())[:4]

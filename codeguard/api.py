@@ -11,7 +11,7 @@ import argparse
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .engine import analyze
+from .engine import analyze, warmup
 
 PUBLIC_KEYS = ("verdict", "risk_score", "categories", "code_language", "reason", "vulnerable_lines")
 
@@ -24,6 +24,7 @@ try:  # ---------- FastAPI flavour ----------
     from fastapi import FastAPI, Body
 
     app = FastAPI(title="CodeGuard", version="0.1.0")
+    warmup()
 
     @app.get("/health")
     def health():
@@ -67,6 +68,8 @@ class Handler(BaseHTTPRequestHandler):  # ---------- stdlib flavour ----------
             payload = json.loads(self.rfile.read(n) or b"{}")
         except Exception:
             payload = {}
+        if not isinstance(payload, dict):  # e.g. a bare JSON string or list: answer, don't crash
+            payload = {}
         debug = "debug=1" in self.path or "debug=true" in self.path
         if self.path.startswith("/analyze/batch"):
             items = payload.get("items") or payload.get("snippets") or []
@@ -91,7 +94,8 @@ def main():
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8000)
     a = ap.parse_args()
-    print(f"CodeGuard listening on http://{a.host}:{a.port}  (POST /analyze)")
+    warmup()
+    print(f"CodeGuard listening on http://{a.host}:{a.port}  (POST /analyze)", flush=True)
     ThreadingHTTPServer((a.host, a.port), Handler).serve_forever()
 
 

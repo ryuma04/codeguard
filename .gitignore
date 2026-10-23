@@ -2,3 +2,7 @@ data/external/raw/
 data/external/*.jsonl
 __pycache__/
 *.pyc
+ui/node_modules/
+ui/.next/
+cli/codeguard.exe
+cli/codeguard

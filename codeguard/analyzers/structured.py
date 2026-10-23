@@ -1,6 +1,7 @@
 """Step 4 (other languages): SQL, YAML, Markdown carriers, dependency typosquatting."""
 import os
 import re
+import threading
 from ..findings import Finding, THREAT as T
 
 # ---------------- SQL ----------------
@@ -94,6 +95,7 @@ underscore request async bluebird rxjs tslib core-js classnames prop-types redux
 _FALLBACK_PYPI = """requests numpy pandas boto3 urllib3 setuptools six python-dateutil certifi idna pyyaml cryptography
 flask django fastapi pillow matplotlib scipy scikit-learn tensorflow torch beautifulsoup4 colorama selenium""".split()
 _lists = None
+_lists_lock = threading.Lock()
 
 
 def _norm(name):
@@ -110,7 +112,11 @@ def _read(fn):
 
 def _load_lists():
     global _lists
-    if _lists is None:
+    if _lists is not None:
+        return _lists
+    with _lists_lock:  # threaded server: build the ~48k-name sets once, not once per racing request
+        if _lists is not None:
+            return _lists
         top_pypi = _read("top_pypi.txt") or _FALLBACK_PYPI
         comp = {}
         for eco in ("pypi", "npm"):

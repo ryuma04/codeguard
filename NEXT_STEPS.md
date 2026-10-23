@@ -1,5 +1,12 @@
 # Handoff: what to do next (in priority order)
 
+Done (tools for manual testing):
+- Go CLI (`cli/`): `scan`, `exec` (runs a command only on allow), `bench`, `health`; fails closed.
+  Proof: `python demo/cli_gate_check.py`.
+- Next.js web UI (`ui/`), styled per `design.md`, proxying to the engine and failing closed.
+- Engine server warms up models/lists at start; model/list loading is thread-safe.
+- Step-by-step guide: MANUAL_TESTING.md.
+
 Done (testing phase):
 - third-party test sets (`eval/external.py`): GuardDog fixtures, deepset prompt-injections, real library code;
 - injection text classifier (`codeguard/textclf.py` + `eval/train_injection.py` + `models/injection.json`);
@@ -16,13 +23,13 @@ Done earlier:
 
 1. **Organizer dev sample**: save it to `data/dev_sample.jsonl` and run `python eval/evaluate.py data/dev_sample.jsonl --errors`.
    Fix *general* gaps only. Never paste dev snippets into rules or training data.
-2. **More training data for the stacker**: add your own labelled snippets (jsonl: code, label, categories) and run
+2. **Git + public repo**: the folder is not a git repo yet; the submission needs a public GitHub repo.
+3. **More training data for the stacker**: add your own labelled snippets (jsonl: code, label, categories) and run
    `python eval/train_ml.py data/extra.jsonl`. Hard benign examples matter most.
-3. **Injection recall** (0.72 on the unseen test split): add English code-comment style injections and multilingual data, then retrain.
-4. **Minimal UI**: a single HTML page that POSTs to /analyze and shows verdict, score, categories, reason, latency.
+4. **Injection recall** (0.72 on the unseen test split): add English code-comment style injections and multilingual data, then retrain.
 5. **npm typosquatting**: add a top-npm-packages list (the PyPI side uses 15k names, npm only ~50).
 6. **JS parser**: add `esprima` (BSD-2) for JS taint, like the Python analyzer.
 7. **Write-up** (2–3 pages): architecture, capability/threat scoring, cascade, ablation table, testing story from TESTING.md.
-8. Optional: Go CLI gate, PEP 578 audit hook in guard.py, PHP/composer.json pack.
+8. Optional: PEP 578 audit hook in guard.py (runtime second gate), PHP/composer.json pack.
 
-Sanity: `python demo/intercept_check.py` must print PASS.
+Sanity: `python demo/intercept_check.py` and `python demo/cli_gate_check.py` must both print PASS.

@@ -122,6 +122,24 @@ Design notes:
 
 Regression after round 4 (all unchanged): library-code FPR 0.5% (3/659), GuardDog precision 0.98 / recall 0.50, deepset **test split** precision 0.98 / recall 0.72, vulnerable-code blocked 2.0%, holdout 1.00/1.00, demo PASS. Re-wrapping every benign sample in all four carriers added one false positive, on a single borderline GuardDog `# ok:` fixture that pings a private IP.
 
+## Round 5: manual testing via the web UI
+
+Input: a 30-case YAML test suite whose `code:` values hold insecure Python and whose `expected:` lists hold labels such as `environment_secret_exposure`. A second AI reviewed our response. Its main point was right, and it pointed at a rule bug rather than a missing YAML parser:
+
+| Issue | Cause | Fix |
+|---|---|---|
+| Line 343 `- environment_secret_exposure` flagged as "reads a secret environment variable" | the env-var rule matched `environ` *inside* `environment…` (no word boundary), then `\w*SECRET` | rule now needs a whole-token accessor plus a real lookup (`os.environ[…]`, `.get(`, `getenv(`, `process.env.X`, `$_ENV[…]`) |
+| `code_language: "python"` for a YAML file | keyword counts from embedded `import` lines outweighed YAML; Dockerfile `FROM` matched Python's `from x import` case-insensitively | if Python does not parse and ≥ 60% of column-0 lines are `key:` / `- item`, it is YAML; Dockerfile signals are case-sensitive |
+| Reason listed the weak capability "reads environment variables" | capability notes were included whenever the stacker was *consulted* | included only when the model *decided* the block (rule score < 0.5 ≤ final) |
+
+Result on the same file: **block, `secret_access`, line 339 only**, risk 0.80 → 0.60, `code_language: yaml`, reason "dumps the whole environment". That matches the reviewer's "ideal result".
+
+On the reviewer's other remarks:
+- "`obfuscated_execution` 0.40 is listed in the UI but not in categories": intentional. `categories` lists only categories at or above the 0.5 block threshold; the UI shows every score for transparency. The 0.40 is `eval(input())` in SEC001: insecure, but not malicious by our 9-category definition.
+- "Only analyse the `code:` field": we deliberately don't. In a real attack the payload can sit under any key, and the guard can't know which field executes. The fix is precise rules, not skipping fields.
+
+Pinned by `python eval/regressions.py` (7 checks). Full regression after the fixes: no change on any set (library code 3/659, GuardDog 98/2, vulnerable code 35, deepset test 0.98/0.72, holdout 100%, carrier 99–100%, demo PASS).
+
 ## What is still missed, and why
 
 - **GuardDog out-of-scope rules** (12/82 caught): screenshots, clipboard, steganography, `cmd-overwrite`, and DLL hijacking via ctypes. Their "malicious" cases are often harmless commands like `os.system("ls")` in a `setup.py`, which GuardDog flags because of *where* they run. Our task judges what the code does, so these stay allowed on purpose.

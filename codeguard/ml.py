@@ -13,6 +13,7 @@ import json
 import math
 import os
 import re
+import threading
 
 from .findings import CATEGORIES, THREAT, CAPABILITY
 
@@ -22,6 +23,7 @@ CONFIDENT = 0.9             # ...and the model only acts when this sure
 LANGS = ["python", "bash", "javascript", "sql", "yaml", "markdown", "php", "powershell", "unknown"]
 _model = None
 _loaded = False
+_lock = threading.Lock()
 
 
 def _entropy(s):
@@ -57,14 +59,17 @@ def featurize(code, language, findings, decoded_layers=0):
 
 
 def _load():
+    # Locked double-check: see textclf._load (threaded server, no half-loaded model).
     global _model, _loaded
     if not _loaded:
-        _loaded = True
-        try:
-            with open(MODEL_PATH) as fh:
-                _model = json.load(fh)
-        except (OSError, ValueError):
-            _model = None
+        with _lock:
+            if not _loaded:
+                try:
+                    with open(MODEL_PATH) as fh:
+                        _model = json.load(fh)
+                except (OSError, ValueError):
+                    _model = None
+                _loaded = True
     return _model
 
 

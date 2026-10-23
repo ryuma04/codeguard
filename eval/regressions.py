@@ -1,0 +1,66 @@
+"""Regression checks for bugs found during manual testing. Run: python eval/regressions.py
+
+Each case pins one behaviour that was wrong once, so it cannot silently come back.
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from codeguard import analyze  # noqa: E402
+from codeguard.router import detect_language  # noqa: E402
+
+# A YAML test suite whose `code:` values hold Python and whose `expected:` lists are labels.
+YAML_SUITE = """test_suite: python_security_stress_test
+version: "1.0"
+tests:
+  - id: SEC001
+    category: code_injection
+    code: |
+      expression = input("Expression: ")
+      result = eval(expression)
+    expected:
+      - unsafe_eval
+  - id: SEC029
+    category: information_disclosure
+    code: |
+      from flask import request
+      def debug_info():
+          return {"environment": dict(os.environ)}
+    expected:
+      - sensitive_information_disclosure
+      - environment_secret_exposure
+"""
+
+
+def check(name, cond, detail=""):
+    print(f"{'PASS' if cond else 'FAIL'}  {name}" + (f"  ({detail})" if detail and not cond else ""))
+    return cond
+
+
+def main():
+    ok = True
+    r = analyze(YAML_SUITE)
+    label_line = YAML_SUITE.splitlines().index("      - environment_secret_exposure") + 1
+    code_line = next(i for i, l in enumerate(YAML_SUITE.splitlines(), 1) if "dict(os.environ)" in l)
+
+    # 1. A YAML label containing "environment" + "secret" is not an env-var read.
+    ok &= check("label 'environment_secret_exposure' is not flagged", label_line not in r["vulnerable_lines"], r["vulnerable_lines"])
+    # 2. The real leak in the embedded code is still caught, on the right line.
+    ok &= check("dict(os.environ) still blocks as secret_access",
+                r["verdict"] == "block" and r["categories"] == ["secret_access"] and r["vulnerable_lines"] == [code_line], r)
+    # 3. A YAML document full of embedded Python reports code_language "yaml".
+    ok &= check("YAML with embedded Python is detected as yaml", r["code_language"] == "yaml", r["code_language"])
+    # 4. The reason lists threats only (no weak capability notes when rules decided).
+    ok &= check("reason has no capability-only notes", "reads environment variables" not in r["reason"], r["reason"])
+    # 5. Real env-var reads are still detected after tightening the rule.
+    for code in ['print(os.environ["AWS_SECRET_ACCESS_KEY"])', "console.log(process.env.STRIPE_SECRET_KEY)"]:
+        ok &= check(f"still blocks: {code}", analyze(code)["verdict"] == "block", analyze(code)["reason"])
+    # 6. Python `from x import y` is not mistaken for a Dockerfile FROM line.
+    ok &= check("python 'from flask import' stays python",
+                detect_language("from flask import Flask\napp = Flask(__name__)\n") == "python")
+    print("\nALL PASS" if ok else "\nSOME FAILED")
+    sys.exit(0 if ok else 1)
+
+
+if __name__ == "__main__":
+    main()

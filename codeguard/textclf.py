@@ -9,11 +9,13 @@ import json
 import math
 import os
 import re
+import threading
 
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "models", "injection.json")
 _WORD = re.compile(r"[a-zA-ZäöüßÄÖÜ']+")
 _model = None
 _loaded = False
+_lock = threading.Lock()
 
 
 def analyzer(text):
@@ -29,14 +31,19 @@ def analyzer(text):
 
 
 def _load():
+    # Double-checked under a lock: the HTTP server is threaded, and a request that
+    # saw "loaded" before the model was actually assigned would silently skip the
+    # classifier and give a different verdict.
     global _model, _loaded
     if not _loaded:
-        _loaded = True
-        try:
-            with open(MODEL_PATH, encoding="utf-8") as fh:
-                _model = json.load(fh)
-        except (OSError, ValueError):
-            _model = None
+        with _lock:
+            if not _loaded:
+                try:
+                    with open(MODEL_PATH, encoding="utf-8") as fh:
+                        _model = json.load(fh)
+                except (OSError, ValueError):
+                    _model = None
+                _loaded = True
     return _model
 
 

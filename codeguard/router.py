@@ -40,8 +40,11 @@ _SIGNALS = {
 }
 
 _COMPILED = {lang: [(re.compile(p, re.I | re.M), w) for p, w in sigs] for lang, sigs in _SIGNALS.items()}
-# SQL keywords are case-insensitive but Python/JS signals should not be.
-_CASE_SENSITIVE = {"python", "javascript"}
+# SQL keywords are case-insensitive but Python/JS signals should not be. Dockerfile
+# instructions are upper-case by convention; case-insensitive `FROM` would match
+# every Python `from x import y`.
+_CASE_SENSITIVE = {"python", "javascript", "dockerfile"}
+_YAML_TOP = re.compile(r"""^(?:[\w.\-]+|"[^"]*"|'[^']*')\s*:(\s|$)|^-\s""")
 _COMPILED.update({lang: [(re.compile(p, re.M), w) for p, w in _SIGNALS[lang]] for lang in _CASE_SENSITIVE})
 
 
@@ -62,6 +65,13 @@ def detect_language(code: str) -> str:
             scores["python"] += 4
     except SyntaxError:
         scores["python"] -= 3
+        # Structure beats keyword counts: a document whose top-level (column-0) lines are
+        # mostly `key:` / `- item` is YAML, even when its values are full of embedded
+        # Python (a test suite, a CI file). Keyword scoring alone calls that "python".
+        top = [l for l in text.splitlines() if l.strip() and not l[0].isspace() and not l.startswith("#")]
+        if len(top) >= 2 and not re.search(r"^\t\S", text, re.M) and text[:1] not in "{[":
+            if sum(bool(_YAML_TOP.match(l)) for l in top) / len(top) >= 0.6:
+                return "yaml"
     # YAML signal is generic; only trust it when nothing code-like wins.
     scores["yaml"] *= 0.8
     # JSON and YAML both match brace/colon lines; a clean JSON parse settles it.

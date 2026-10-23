@@ -12,6 +12,28 @@ curl -X POST localhost:8000/analyze/batch -H "Content-Type: application/json" -d
 python -m codeguard some_file.py          # CLI, exit code 2 on block
 ```
 
+**Step-by-step manual checks: [MANUAL_TESTING.md](MANUAL_TESTING.md).**
+
+### Go CLI (`cli/`): single-binary client and execution gate
+```bash
+cd cli && go build -o codeguard.exe . && cd ..
+./cli/codeguard.exe scan --pretty file.py              # verdict; exit 2 on block
+./cli/codeguard.exe exec -- python snippet.py           # runs the command ONLY on allow
+./cli/codeguard.exe bench -c 4 data/external/guarddog.jsonl   # latency / throughput
+python demo/cli_gate_check.py                           # interception proof through the binary
+```
+The CLI talks to the warm engine over localhost HTTP, so a check costs a few milliseconds instead of a Python start-up per check. It **fails closed**: if the engine is unreachable, times out or answers garbage, `scan` and `exec` treat it as a block. Go standard library only.
+
+### Web UI (`ui/`): Next.js 16
+```bash
+cd ui && npm install && npm run dev      # http://localhost:3000 (engine must be running)
+```
+- **Input:** paste code, or pick a "should allow" / "should block" example chip.
+- **Output:** verdict, risk score (rule score vs model when the stacker is consulted), per-category scores, reasons, flagged lines highlighted in the editor, round-trip and engine latency, and the raw schema response.
+- **Engine link:** the UI calls its own `/api/analyze` route, which proxies to the engine (`CODEGUARD_URL`, default `http://127.0.0.1:8000`) and fails closed. Styled per `design.md` (neo-brutalism × claymorphism).
+
+Measured through HTTP with one worker: p50 ≈ 5.5 ms round-trip, ~120 checks/s.
+
 ## Pipeline (codeguard/engine.py)
 1. **Router** (`router.py`) — language detection: python, bash, javascript, sql, yaml, markdown, php, powershell.
 2. **Deobfuscation** (`deobfuscate.py`) — static decode of base64/hex/\x/chr()/fromCharCode/rot13/reversed, up to 3 layers, then re-scan. Never executes.
@@ -97,6 +119,9 @@ Efficiency: pure Python, no GPU, no network. Median latency 0.5–3 ms per snipp
 |---|---|---|
 | Python stdlib (ast, tokenize, re, http.server) | parsing, server | PSF |
 | FastAPI / uvicorn (optional) | HTTP | MIT / BSD-3 |
+| Go standard library | CLI client / execution gate | BSD-3 |
+| Next.js 16, React 19 | web UI | MIT / MIT |
+| Bricolage Grotesque, Outfit, JetBrains Mono (Google Fonts via `next/font`) | UI typography | OFL-1.1 |
 | scikit-learn | trains both models offline (not needed at runtime) | BSD-3 |
 | DataDog GuardDog | capability/threat idea + rule ideas, adapted not copied; its rule-test fixtures used **as a test set only** | Apache-2.0 |
 | deepset/prompt-injections (Hugging Face) | train split trains the injection classifier; test split for evaluation | Apache-2.0 |

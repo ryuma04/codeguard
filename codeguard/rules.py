@@ -10,6 +10,10 @@ from .findings import Finding, CAPABILITY as C, THREAT as T
 
 _HOME = r"(~|\$HOME|\$\{HOME\}|/home/[\w.\-]+|/root|%USERPROFILE%|C:\\\\Users\\\\[\w.\-]+)"
 _ROOTISH = r"(/|/\*|~|~/|~/\*|\$HOME/?\*?|/(etc|usr|var|home|boot|bin|sbin|lib|opt|srv|root)/?\*?)(?=[\s'\"`;)|&]|$)"
+# An actual env-var read: the accessor must be a whole token followed by a real lookup
+# (os.environ["X"], os.environ.get("X"), os.getenv("X"), process.env.X, $_ENV['X']), so words
+# like "environment_secret_exposure" in a YAML label or a comment do not count.
+_ENV_READ = r"(\benviron\b|\bgetenv\b|\bprocess\.env\b|\$ENV\b|\$_ENV\b)\s*(\.get\s*\(|\[|\(|\.|\{)\s*['\"]?"
 
 RULES = [
     # ---------------- secret_access ----------------
@@ -19,9 +23,9 @@ RULES = [
     ("secret_access", T, 0.55, r"(open|read|cat|readFile\w*|file_get_contents|Get-Content|type)\W{1,4}[^\n]*?(^|[\s'\"/\\])\.env(\.\w+)?\b", "reads a .env secrets file"),
     ("secret_access", T, 0.70, r"(?-i:Login Data|[/\\]Cookies\b|key[34]\.db|logins\.json|Local State|login\.keychain|\.kdbx|wallet\.dat|Local Storage/leveldb)", "touches browser/wallet credential store"),
     ("secret_access", T, 0.60, r"-----BEGIN (RSA |OPENSSH |EC |DSA |PGP )?PRIVATE KEY-----|\bAKIA[0-9A-Z]{16}\b|\bghp_[A-Za-z0-9]{36}\b|\bxox[bpas]-[A-Za-z0-9-]{10,}|\bsk_live_[A-Za-z0-9]{20,}", "handles a private key / live API token"),
-    ("secret_access", T, 0.55, r"(environ|getenv|process\.env|\$ENV|\$_ENV|getenv\()\W{0,3}[\[\('\"\.]*\W?(AWS_SECRET\w*|AWS_ACCESS_KEY\w*|\w*PRIVATE_KEY|\w*CLIENT_SECRET)", "reads a cloud/private secret from the environment"),
-    ("secret_access", T, 0.45, r"(environ|getenv|process\.env|\$ENV|\$_ENV|getenv\()\W{0,3}[\[\('\"\.]*\W?(\w*API_KEY|\w*SECRET\w*|\w*TOKEN|\w*PASSWORD|\w*PASSWD|DATABASE_URL)", "reads a secret environment variable"),
-    ("secret_access", T, 0.65, r"(print|console\.log|echo|logger\.\w+|puts|Write-(Host|Output))\W[^\n]*(environ\[|getenv\(|process\.env\.|\$\w*(TOKEN|SECRET|PASSWORD|API_KEY)\b)", "prints secrets from the environment"),
+    ("secret_access", T, 0.55, _ENV_READ + r"(AWS_SECRET\w*|AWS_ACCESS_KEY\w*|\w*PRIVATE_KEY|\w*CLIENT_SECRET)", "reads a cloud/private secret from the environment"),
+    ("secret_access", T, 0.45, _ENV_READ + r"(\w*API_KEY|\w*SECRET\w*|\w*TOKEN|\w*PASSWORD|\w*PASSWD|DATABASE_URL)", "reads a secret environment variable"),
+    ("secret_access", T, 0.65, r"(print|console\.log|echo|logger\.\w+|puts|Write-(Host|Output))\W[^\n]*(\benviron\s*\[|\bgetenv\s*\(|\bprocess\.env\.|\$\w*(TOKEN|SECRET|PASSWORD|API_KEY)\b)", "prints secrets from the environment"),
     ("secret_access", T, 0.55, r"dict\(\s*os\.environ\s*\)|os\.environ\.copy\(\)|json\.dumps\(\s*(dict\()?os\.environ|JSON\.stringify\(\s*process(\.env|\[\s*['\"]env['\"]\s*\])\s*\)|(push|send|write|post)\([^\n]*\bprocess\.env\b(?!\.)|\bprintenv\b\s*(\||>|$)|\benv\s*\|", "dumps the whole environment"),
     ("secret_access", C, 0.20, r"os\.environ|os\.getenv|process\.env|\bgetenv\(", "reads environment variables"),
     ("secret_access", T, 0.50, r"(security\s+find-generic-password|secret-tool\s+lookup|keyring\.get_password|mimikatz|lsass)", "queries OS credential manager"),
