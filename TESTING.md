@@ -95,6 +95,33 @@ Most remaining blocks are code that literally contains `system('rm -rf /')` or `
 
 Re-check after round 3: library-code false alarms 0.5% (unchanged), GuardDog precision 0.98 / recall 0.50, deepset test split precision 0.98 / recall 0.72 (unchanged), holdout 1.00 / 1.00, demo PASS.
 
+## Round 4: code hidden in other file formats (carrier test)
+
+Concern raised: every test so far used plain scripts. What if the malicious code is embedded in a YAML / JSON / notebook / Dockerfile instead? Is the detector overfit to "looks like a script"?
+
+Answer, measured by `python eval/carrier_test.py` (it re-packages the malicious samples we already have — GuardDog + holdout — into each format and compares recall; no new payloads are written):
+
+| Carrier | Rules only | With carrier extractor (`codeguard/carriers.py`) |
+|---|---|---|
+| YAML block value under any key | 72% | **100%** |
+| JSON config string | 63% | **100%** |
+| Jupyter notebook cell | 62% | **99%** |
+| Dockerfile heredoc | 71% | **99%** |
+
+Before this round, only YAML `run:`/`command:` keys and Markdown fences were extracted. The gap: line rules still fire on blatant payloads wherever they are, but the **deep Python analysis** (alias tracking, secret→network taint) only ran on text routed to it as Python. A stealth exfiltration (`import os as o` … `o.environ.get('SECRET')` → `requests.post`) buried in a YAML value was missed.
+
+What the extractor adds:
+- YAML: block scalars (`|`, `>`) and code-looking inline values under **any** key, not just a fixed list.
+- JSON: string values that look like code or sit under a script-ish key — covers `package.json` scripts, Jupyter notebook cells, and config. Strings are un-escaped first, which also fixes the old "escaped `\n` breaks line rules" gap.
+- Dockerfile `RUN`/`CMD`/`ENTRYPOINT`, Makefile recipes (grouped per target), and `python -c` / `node -e` / heredoc bodies inside shell.
+- Every extractor runs regardless of the *detected* language, because a YAML file full of embedded Python is detected as Python, which is exactly how an attacker hides the YAML structure from a language-gated extractor.
+
+Design notes:
+- Verbatim slices (YAML/Dockerfile/Makefile/heredoc) skip a second rule scan — the top-level line scan already covered those characters — so findings are not double-counted. JSON/notebook bodies are un-escaped, so they do get the rule scan.
+- Cost: all extractors are regex/parse guards that exit early on the wrong structure. Latency is unchanged in the regression runs.
+
+Regression after round 4 (all unchanged): library-code FPR 0.5% (3/659), GuardDog precision 0.98 / recall 0.50, deepset **test split** precision 0.98 / recall 0.72, vulnerable-code blocked 2.0%, holdout 1.00/1.00, demo PASS. Re-wrapping every benign sample in all four carriers added one false positive, on a single borderline GuardDog `# ok:` fixture that pings a private IP.
+
 ## What is still missed, and why
 
 - **GuardDog out-of-scope rules** (12/82 caught): screenshots, clipboard, steganography, `cmd-overwrite`, and DLL hijacking via ctypes. Their "malicious" cases are often harmless commands like `os.system("ls")` in a `setup.py`, which GuardDog flags because of *where* they run. Our task judges what the code does, so these stay allowed on purpose.
@@ -105,12 +132,15 @@ Re-check after round 3: library-code false alarms 0.5% (unchanged), GuardDog pre
 ## Reproduce
 ```bash
 pip install scikit-learn            # training only
-python eval/external.py fetch       # ~1 MB download: GuardDog sparse clone + HF rows API
+python eval/external.py fetch       # ~1 MB download: GuardDog sparse clone + HF datasets
 python eval/external.py build
+python eval/build_pkg_lists.py      # package reputation lists
 python eval/train_injection.py
 python eval/train_ml.py
 python eval/evaluate.py data/external/benign_oss.jsonl --errors
 python eval/evaluate.py data/external/guarddog.jsonl --group-by rule --errors
+python eval/evaluate.py data/external/vulnerable_code.jsonl --group-by group
 python eval/evaluate.py data/external/prompt_injections.jsonl
+python eval/carrier_test.py         # code hidden in other file formats
 python eval/evaluate.py --ablation
 ```

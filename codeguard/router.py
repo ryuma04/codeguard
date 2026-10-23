@@ -34,6 +34,9 @@ _SIGNALS = {
     ],
     "php": [(r"<\?php", 10), (r"\$_(GET|POST|REQUEST|SERVER|COOKIE)\b", 4), (r"\$\w+\s*=", 1), (r"->\w+\(", 1)],
     "powershell": [(r"\b(Invoke-\w+|Get-\w+|Set-\w+|New-Object|Remove-Item|Start-Process)\b", 4), (r"-EncodedCommand|-enc\b", 4)],
+    "dockerfile": [(r"^\s*FROM\s+\S+", 6), (r"^\s*(RUN|CMD|ENTRYPOINT|COPY|ADD|WORKDIR|ENV|EXPOSE|ARG|LABEL|USER)\s+\S", 3)],
+    "json": [(r"^\s*\{", 2), (r'"\w+"\s*:', 1), (r'"(cells|nbformat|scripts|dependencies)"\s*:', 5)],
+    "makefile": [(r"^[\w.\-]+\s*:(?!=)[^\n]*\n\t", 6), (r"^\.PHONY\s*:", 5), (r"^\t@?\S", 1)],
 }
 
 _COMPILED = {lang: [(re.compile(p, re.I | re.M), w) for p, w in sigs] for lang, sigs in _SIGNALS.items()}
@@ -61,5 +64,14 @@ def detect_language(code: str) -> str:
         scores["python"] -= 3
     # YAML signal is generic; only trust it when nothing code-like wins.
     scores["yaml"] *= 0.8
+    # JSON and YAML both match brace/colon lines; a clean JSON parse settles it.
+    if scores["json"] or text[:1] in "{[":
+        try:
+            import json as _json
+            _json.loads(text)
+            scores["json"] += 5
+            scores["yaml"] *= 0.5
+        except (ValueError, RecursionError):
+            scores["json"] *= 0.3
     best = max(scores, key=scores.get)
     return best if scores[best] > 1 else "unknown"

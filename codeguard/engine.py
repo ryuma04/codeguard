@@ -9,6 +9,7 @@ from .findings import CATEGORIES, Context, Finding, THREAT, CAPABILITY
 from .router import detect_language
 from .rules import scan_text
 from .deobfuscate import unwrap
+from .carriers import extract_embedded
 from .injection import scan_injection
 from .analyzers.python_ast import analyze_python
 from . import ml
@@ -29,11 +30,17 @@ def _scan_shell_like(text, line_offset, ctx, source, depth):
     return hits
 
 
-def _analyze_chunk(text: str, language: str, line_offset: int, ctx: Context, depth: int = 0):
-    """Analyze one piece of code; recursion handles payloads, embedded code, decoded layers."""
+def _analyze_chunk(text: str, language: str, line_offset: int, ctx: Context, depth: int = 0, skip_rules: bool = False):
+    """Analyze one piece of code; recursion handles payloads, embedded code, decoded layers.
+
+    skip_rules: the caller already ran the rule layer over these exact characters
+    (a carrier fragment that is a verbatim slice of the parent). We still want the
+    structural/decoding layers on it, but re-running the line rules would double-count.
+    """
     if depth > 4 or not text.strip():
         return
-    ctx.findings.extend(_scan_shell_like(text, line_offset, ctx, "rule", depth))
+    if not skip_rules:
+        ctx.findings.extend(_scan_shell_like(text, line_offset, ctx, "rule", depth))
     if not LAYERS["structural"]:
         return
 
@@ -64,6 +71,20 @@ def _analyze_chunk(text: str, language: str, line_offset: int, ctx: Context, dep
             lang = lang or detect_language(body)
             sub = Context(body)
             _analyze_chunk(body, lang, line - 1 + line_offset, sub, depth + 1)
+            ctx.findings.extend(sub.findings)
+
+    # Carrier extraction: code embedded in JSON/YAML/Dockerfile/Makefile/heredoc/-c.
+    # Each fragment is re-routed through the full cascade in its own language.
+    if depth < 3:
+        for line, lang, body, verbatim in extract_embedded(text, language):
+            sub_lang = lang or detect_language(body)
+            if sub_lang == "unknown":
+                sub_lang = "bash"
+            sub = Context(body)
+            _analyze_chunk(body, sub_lang, line - 1 + line_offset, sub, depth + 1, skip_rules=verbatim)
+            for f in sub.findings:
+                if f.source == "rule":
+                    f.source = "carrier"
             ctx.findings.extend(sub.findings)
 
     # Deobfuscation: decode blobs statically and analyse the plaintext.

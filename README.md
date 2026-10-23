@@ -31,9 +31,10 @@ python -m codeguard some_file.py          # CLI, exit code 2 on block
      - typosquat check against the top 1,000 PyPI projects (the top 15,000 count as known-good).
 
      Lists live in `codeguard/data/` and are built by `eval/build_pkg_lists.py`.
-5. **AI-instruction detector** (`injection.py`) — comments/strings/prose stream, zero-width/bidi chars, hidden HTML comments. Phrase rules first, then a **learned text classifier** (`textclf.py`) as a second opinion on every comment block / docstring / string.
-6. **Decision** — GuardDog-style correlation (capability alone ≤ 0.45, threat + capability → block), combos (secret + network ⇒ exfiltration), fail-closed on errors. Threshold 0.5.
-7. **ML stacker** (`ml.py`) — logistic regression over the earlier layers' signals (per-category threat/capability strength, finding counts, decode depth, string entropy, language). Consulted **only** when the rule risk is in the ambiguous band 0.3–0.7, and only acts when it is ≥ 0.9 sure.
+5. **Carrier extraction** (`carriers.py`) — code embedded in a non-script file is pulled out and re-routed through the whole cascade in its own language: YAML block scalars and code-looking values under **any** key (not just `run:`), JSON string values (config, `package.json` scripts, Jupyter notebook cells — un-escaped first), Dockerfile `RUN`/`CMD`/`ENTRYPOINT`, Makefile recipes, and `python -c` / `node -e` / heredoc bodies inside shell. Every extractor runs regardless of the detected language, because burying Python in a YAML value is exactly how language detection is fooled.
+6. **AI-instruction detector** (`injection.py`) — comments/strings/prose stream, zero-width/bidi chars, hidden HTML comments. Phrase rules first, then a **learned text classifier** (`textclf.py`) as a second opinion on every comment block / docstring / string.
+7. **Decision** — GuardDog-style correlation (capability alone ≤ 0.45, threat + capability → block), combos (secret + network ⇒ exfiltration), fail-closed on errors. Threshold 0.5.
+8. **ML stacker** (`ml.py`) — logistic regression over the earlier layers' signals (per-category threat/capability strength, finding counts, decode depth, string entropy, language). Consulted **only** when the rule risk is in the ambiguous band 0.3–0.7, and only acts when it is ≥ 0.9 sure.
 
 Both models are trained offline with scikit-learn and exported to JSON (`models/`). Inference is pure Python: scikit-learn is not needed at runtime.
 
@@ -67,6 +68,17 @@ Full method and per-rule tables are in [TESTING.md](TESTING.md).
 | GuardDog, rules in our 9 categories | 114 mal | – | **0.76** | – | |
 | `deepset/prompt-injections` **test split** in code comments | 60 inj / 56 benign | **0.98** | 0.72 | 1.8% | the train split was used to train the classifier |
 | Vulnerable-but-not-malicious code: SecurityEval (121) + CyberNative vulnerable/fixed pairs (1,600, C/C++/Java/C#/PHP/Ruby/Go/JS/Python…) | 1,721 benign | – | – | 2.0% blocked | most blocks are code that literally contains `rm -rf /` or `DROP TABLE` payloads; see TESTING.md |
+
+**Carrier robustness** (`python eval/carrier_test.py`): the same malicious samples, re-packaged inside other file formats. Recall over samples that block in plain form:
+
+| Carrier | Rules only | With carrier extractor |
+|---|---|---|
+| YAML block value (any key) | 72% | **100%** |
+| JSON config string | 63% | **100%** |
+| Jupyter notebook cell | 62% | **99%** |
+| Dockerfile heredoc | 71% | **99%** |
+
+The line rules alone catch the blatant payloads (`rm -rf`, metadata IP) wherever they sit, but miss subtle Python attacks (aliased imports, a secret flowing to the network) once they are buried in a config value. Extraction recovers them. Wrapping the 659 real library files + benign fixtures in all four carriers produced one extra false positive, on a single borderline GuardDog `# ok:` fixture.
 | Hand-written holdout (`eval/holdout.py`) | 46 mal / 30 benign | 1.00 | 1.00 | 0% | optimistic: used to find rule gaps and to train the stacker |
 
 What changed during testing:

@@ -6,6 +6,8 @@ Done (testing phase):
 - structural fixes found by testing. Results and method are in TESTING.md.
 - package reputation from user-suggested datasets: top-15k PyPI names + DataDog malicious/compromised name lists
   (`eval/build_pkg_lists.py` → `codeguard/data/`); SecurityEval + CyberNative as a vulnerable-code false-positive test.
+- carrier extraction (`codeguard/carriers.py`): code hidden in YAML/JSON/notebook/Dockerfile/Makefile/`-c`/heredoc is
+  pulled out and re-analysed. Carrier recall 62-72% -> 99-100%. Test: `python eval/carrier_test.py`.
 
 Done earlier:
 - `eval/evaluate.py`: metrics, per-category, latency, `--url`, `--ablation`, `--group-by`;
