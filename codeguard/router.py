@@ -1,0 +1,65 @@
+"""Step 1: language detection (cheap heuristics, no dependencies)."""
+import ast
+import re
+
+_SIGNALS = {
+    "python": [
+        (r"^\s*(import|from)\s+[\w\.]+", 3), (r"^\s*def\s+\w+\(.*\)\s*:", 3),
+        (r"^\s*class\s+\w+.*:\s*$", 2), (r"\bprint\(", 1), (r"\bself\.", 2),
+        (r"^\s*(if|for|while|with|try|elif|else)\b.*:\s*$", 2), (r"__\w+__", 1),
+        (r"\bos\.(system|environ|popen)", 2), (r"#!.*python", 5),
+    ],
+    "bash": [
+        (r"^#!.*\b(ba|z|da)?sh\b", 6), (r"^\s*(sudo|apt|apt-get|yum|chmod|chown|curl|wget|echo|export|cd|ls|rm|mkdir|cat|grep|nc|crontab|systemctl|dd|mkfs)\b", 2),
+        (r"\$\{?\w+\}?", 1), (r"\|\s*(ba)?sh\b", 3), (r"\bfi\b|\bdone\b|\besac\b", 3),
+        (r"&&|\|\|", 1), (r":\(\)\s*\{", 6), (r"/dev/(tcp|null|zero|sd)", 2),
+    ],
+    "javascript": [
+        (r"\b(const|let|var)\s+\w+\s*=", 3), (r"\brequire\(['\"]", 4), (r"=>", 2),
+        (r"\bfunction\s+\w*\s*\(", 2), (r"\bconsole\.log\(", 3), (r"\bmodule\.exports\b", 4),
+        (r"\bprocess\.(env|argv)", 3), (r"\bawait\s+fetch\(", 3), (r"^\s*import\s+.*\s+from\s+['\"]", 4),
+        (r";\s*$", 1), (r"\bdocument\.|\bwindow\.", 2),
+    ],
+    "sql": [
+        (r"^\s*(SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM|DROP|CREATE|ALTER|TRUNCATE|GRANT|REVOKE|WITH|EXEC|COPY|LOAD\s+DATA)\s+[\w*@`\"\[]", 5),
+        (r"(?<![.\w])(FROM|WHERE|TABLE|INTO|VALUES|JOIN)\s+[\w`\"\[(]", 2),
+    ],
+    "yaml": [
+        (r"^\s*[\w\-\.]+:\s*(\S.*)?$", 1), (r"^\s*-\s+[\w\-\.]+:\s", 2), (r"^---\s*$", 3),
+        (r"^\s*(apiVersion|kind|jobs|steps|runs-on|services|image|on):", 4),
+    ],
+    "markdown": [
+        (r"^#{1,6}\s+\S", 3), (r"^```", 4), (r"^\s*[-*]\s+\S", 1), (r"\[[^\]]+\]\([^)]+\)", 2),
+        (r"<!--", 2), (r"\*\*[^*]+\*\*", 1),
+    ],
+    "php": [(r"<\?php", 10), (r"\$_(GET|POST|REQUEST|SERVER|COOKIE)\b", 4), (r"\$\w+\s*=", 1), (r"->\w+\(", 1)],
+    "powershell": [(r"\b(Invoke-\w+|Get-\w+|Set-\w+|New-Object|Remove-Item|Start-Process)\b", 4), (r"-EncodedCommand|-enc\b", 4)],
+}
+
+_COMPILED = {lang: [(re.compile(p, re.I | re.M), w) for p, w in sigs] for lang, sigs in _SIGNALS.items()}
+# SQL keywords are case-insensitive but Python/JS signals should not be.
+_CASE_SENSITIVE = {"python", "javascript"}
+_COMPILED.update({lang: [(re.compile(p, re.M), w) for p, w in _SIGNALS[lang]] for lang in _CASE_SENSITIVE})
+
+
+def detect_language(code: str) -> str:
+    text = code.strip()
+    if not text:
+        return "unknown"
+    scores = {lang: 0.0 for lang in _COMPILED}
+    for lang, rules in _COMPILED.items():
+        for rx, w in rules:
+            hits = len(rx.findall(text))
+            if hits:
+                scores[lang] += w * min(hits, 5)
+    # A clean Python parse is strong evidence (but trivial one-liners parse too).
+    try:
+        ast.parse(text)
+        if len(text.splitlines()) > 1 or re.search(r"\(|import|=", text):
+            scores["python"] += 4
+    except SyntaxError:
+        scores["python"] -= 3
+    # YAML signal is generic; only trust it when nothing code-like wins.
+    scores["yaml"] *= 0.8
+    best = max(scores, key=scores.get)
+    return best if scores[best] > 1 else "unknown"

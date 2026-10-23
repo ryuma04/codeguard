@@ -1,0 +1,41 @@
+{
+ "intercept": -1.3396449729954958,
+ "coef": {
+  "c_data_exfiltration": 0.07846,
+  "c_dependency_risk": -0.01665,
+  "c_destructive_command": -0.01866,
+  "c_obfuscated_execution": -0.08422,
+  "c_persistence_or_privesc": 0.03629,
+  "c_resource_exhaustion": 0.06044,
+  "c_secret_access": -0.0816,
+  "decoded_layers": 0.1048,
+  "from_ast": 0.60216,
+  "from_combo": 0.11583,
+  "lang_bash": 0.41858,
+  "lang_javascript": 0.12848,
+  "lang_python": -0.45683,
+  "lang_sql": -0.112,
+  "lang_unknown": 0.02214,
+  "log_len": -0.14027,
+  "long_token": 0.00074,
+  "max_str_entropy": 0.19635,
+  "n_cap": -0.04336,
+  "n_threat": 2.45591,
+  "n_threat_cats": 0.36992,
+  "non_alnum_ratio": -0.01302,
+  "t_ai_targeted_instructions": 0.31069,
+  "t_data_exfiltration": 0.17314,
+  "t_dependency_risk": 0.40242,
+  "t_destructive_command": 0.53387,
+  "t_obfuscated_execution": 0.14142,
+  "t_persistence_or_privesc": 0.23888,
+  "t_resource_exhaustion": 0.4256,
+  "t_secret_access": 0.367,
+  "t_ssrf_network_exfil": 0.30862
+ },
+ "trained_on": 76,
+ "ambiguous_band": [
+  0.3,
+  0.7
+ ]
+}

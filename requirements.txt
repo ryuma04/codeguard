@@ -1,0 +1,4 @@
+# Core engine + server are pure Python standard library (3.10+). Optional:
+fastapi>=0.110        # optional: run with `uvicorn codeguard.api:app`
+uvicorn>=0.29         # optional
+scikit-learn>=1.4     # training only (eval/train_ml.py); inference does not need it
