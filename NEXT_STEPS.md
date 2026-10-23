@@ -4,6 +4,8 @@ Done (testing phase):
 - third-party test sets (`eval/external.py`): GuardDog fixtures, deepset prompt-injections, real library code;
 - injection text classifier (`codeguard/textclf.py` + `eval/train_injection.py` + `models/injection.json`);
 - structural fixes found by testing. Results and method are in TESTING.md.
+- package reputation from user-suggested datasets: top-15k PyPI names + DataDog malicious/compromised name lists
+  (`eval/build_pkg_lists.py` → `codeguard/data/`); SecurityEval + CyberNative as a vulnerable-code false-positive test.
 
 Done earlier:
 - `eval/evaluate.py`: metrics, per-category, latency, `--url`, `--ablation`, `--group-by`;
@@ -16,8 +18,9 @@ Done earlier:
    `python eval/train_ml.py data/extra.jsonl`. Hard benign examples matter most.
 3. **Injection recall** (0.72 on the unseen test split): add English code-comment style injections and multilingual data, then retrain.
 4. **Minimal UI**: a single HTML page that POSTs to /analyze and shows verdict, score, categories, reason, latency.
-5. **JS parser**: add `esprima` (BSD-2) for JS taint, like the Python analyzer.
-6. **Write-up** (2–3 pages): architecture, capability/threat scoring, cascade, ablation table, testing story from TESTING.md.
-7. Optional: Go CLI gate, PEP 578 audit hook in guard.py, PHP/composer.json pack.
+5. **npm typosquatting**: add a top-npm-packages list (the PyPI side uses 15k names, npm only ~50).
+6. **JS parser**: add `esprima` (BSD-2) for JS taint, like the Python analyzer.
+7. **Write-up** (2–3 pages): architecture, capability/threat scoring, cascade, ablation table, testing story from TESTING.md.
+8. Optional: Go CLI gate, PEP 578 audit hook in guard.py, PHP/composer.json pack.
 
 Sanity: `python demo/intercept_check.py` must print PASS.

@@ -1,4 +1,5 @@
 """Step 4 (other languages): SQL, YAML, Markdown carriers, dependency typosquatting."""
+import os
 import re
 from ..findings import Finding, THREAT as T
 
@@ -82,18 +83,48 @@ def extract_markdown_code(code: str):
             yield code.count("\n", 0, m.start()) + 1, "bash", m.group(1)
 
 
-# ---------------- Dependency typosquatting ----------------
-TOP_PYPI = """requests numpy pandas boto3 urllib3 setuptools six python-dateutil certifi idna charset-normalizer
-pyyaml typing-extensions botocore s3transfer packaging pip wheel cryptography pydantic attrs jinja2 markupsafe click
-protobuf pytest flask django fastapi uvicorn sqlalchemy psycopg2 pillow matplotlib scipy scikit-learn tensorflow torch
-transformers beautifulsoup4 lxml selenium openai anthropic langchain aiohttp httpx colorama tqdm rich pyjwt paramiko
-redis pymongo celery gunicorn werkzeug jsonschema docutils tornado websocket-client grpcio google-api-core opencv-python
-keras xgboost lightgbm nltk spacy sympy networkx pyarrow pytz tzdata filelock virtualenv black isort mypy pylint coverage""".split()
+# ---------------- Dependency reputation: known-malicious + typosquatting ----------------
+# Lists built by eval/build_pkg_lists.py from hugovk/top-pypi-packages (names only) and the
+# manifest name lists of DataDog/malicious-software-packages-dataset (Apache-2.0).
+_DATA = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 TOP_NPM = """react react-dom lodash express axios chalk commander debug moment uuid typescript webpack vue next jquery
 dotenv cors body-parser mongoose socket.io jsonwebtoken bcrypt nodemon eslint prettier jest mocha yargs inquirer
 underscore request async bluebird rxjs tslib core-js classnames prop-types redux react-redux styled-components
 @babel/core babel-loader node-fetch ws glob minimist semver colors cross-env electron puppeteer discord.js""".split()
-_TOP = {p.lower(): eco for eco, lst in (("pypi", TOP_PYPI), ("npm", TOP_NPM)) for p in lst}
+_FALLBACK_PYPI = """requests numpy pandas boto3 urllib3 setuptools six python-dateutil certifi idna pyyaml cryptography
+flask django fastapi pillow matplotlib scipy scikit-learn tensorflow torch beautifulsoup4 colorama selenium""".split()
+_lists = None
+
+
+def _norm(name):
+    return re.sub(r"[-_.]+", "-", name.lower())
+
+
+def _read(fn):
+    try:
+        with open(os.path.join(_DATA, fn), encoding="utf-8") as f:
+            return [l.strip() for l in f if l.strip()]
+    except OSError:
+        return []
+
+
+def _load_lists():
+    global _lists
+    if _lists is None:
+        top_pypi = _read("top_pypi.txt") or _FALLBACK_PYPI
+        comp = {}
+        for eco in ("pypi", "npm"):
+            for line in _read(f"compromised_{eco}.txt"):
+                name, *vers = line.split()
+                comp[(eco, name)] = set(vers)
+        _lists = {
+            "good": {"pypi": set(top_pypi), "npm": set(TOP_NPM)},
+            # popular enough to be worth squatting: (name, sorted letters) precomputed once
+            "targets": {eco: [(t, sorted(t)) for t in names] for eco, names in (("pypi", top_pypi[:1000]), ("npm", TOP_NPM))},
+            "bad": {"pypi": set(_read("malicious_pypi.txt")), "npm": set(_read("malicious_npm.txt"))},
+            "compromised": comp,
+        }
+    return _lists
 
 
 def _lev(a, b, cap=3):
@@ -104,32 +135,55 @@ def _lev(a, b, cap=3):
         cur = [i]
         for j, cb in enumerate(b, 1):
             cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        if min(cur) > cap:  # every alignment already exceeds the cap
+            return cap + 1
         prev = cur
     return prev[-1]
 
 
-_INSTALL = re.compile(r"\b(pip3?|python3?\s+-m\s+pip|npm|yarn|pnpm)\s+(install|add|i)\b([^\n;&|]*)", re.I)
+_SQUAT_SUFFIXES = {"py", "js", "dev", "lib", "api", "official", "new", "2", "3"}
+
+
+_INSTALL = re.compile(r"\b(pip3?|python3?\s+-m\s+pip|uv\s+pip|poetry|npm|yarn|pnpm)\s+(install|add|i)\b([^\n;&|]*)", re.I)
+
+
+def _parse_token(tok, eco):
+    """'requests==2.0' -> ('requests', '2.0'); '@scope/pkg@1.2' -> ('@scope/pkg', '1.2')."""
+    if eco == "npm":
+        scoped = tok.startswith("@")
+        body = tok[1:] if scoped else tok
+        name, _, ver = body.partition("@")
+        return ("@" if scoped else "") + name.lower(), ver or None
+    m = re.match(r"([A-Za-z0-9][\w.\-]*)(?:\[[^\]]*\])?\s*(?:==\s*([\w.\-]+)|[<>=!~].*)?$", tok)
+    return (_norm(m.group(1)), m.group(2)) if m else (None, None)
 
 
 def check_typosquats(code: str):
+    lists = _load_lists()
     out = []
     for lineno, line in enumerate(code.splitlines(), 1):
         for m in _INSTALL.finditer(line):
+            eco = "npm" if m.group(1).lower() in ("npm", "yarn", "pnpm") else "pypi"
             for tok in m.group(3).split():
                 tok = tok.strip("`'\",;()")
-                if tok.startswith("-") or "://" in tok or "/" in tok and not tok.startswith("@"):
+                if not tok or tok.startswith("-") or "://" in tok or (eco == "pypi" and "/" in tok) or tok.startswith(".") \
+                        or re.search(r"\.(txt|whl|tar\.gz|zip|tgz|cfg|toml)$", tok):
                     continue
-                name = re.split(r"[=<>!~\[@]", tok.lstrip("@"), maxsplit=1)[0].lower() if not tok.startswith("@") else tok.lower()
-                if not name or name in _TOP or len(name) < 4:
+                name, ver = _parse_token(tok, eco)
+                if not name or len(name) < 2:
                     continue
-                norm = name.replace("_", "-").replace(".", "-")
-                if norm in _TOP:
+                if name in lists["bad"][eco]:
+                    out.append(Finding("dependency_risk", T, 0.95, lineno, f"'{name}' is a known malicious {eco} package", "pkg-intel"))
                     continue
-                for good in _TOP:
-                    d = _lev(norm, good)
+                if ver and ver in lists["compromised"].get((eco, name), ()):
+                    out.append(Finding("dependency_risk", T, 0.9, lineno, f"{name} {ver} is a known compromised release", "pkg-intel"))
+                    continue
+                if name in lists["good"][eco] or len(name) < 4:
+                    continue
+                srt = sorted(name)
+                for good, good_srt in lists["targets"][eco]:
                     limit = 1 if len(good) <= 6 else 2
-                    swapped = sorted(norm) == sorted(good)
-                    if d <= limit or swapped or re.fullmatch(re.escape(good) + r"[-_]?(py|js|dev|lib|api|official|new|2|3)", norm):
+                    if (len(name) == len(good) and srt == good_srt) or _lev(name, good, limit) <= limit or                             (name.startswith(good) and name[len(good):].lstrip("-_") in _SQUAT_SUFFIXES):
                         out.append(Finding("dependency_risk", T, 0.85, lineno,
                                            f"'{name}' looks like a typosquat of popular package '{good}'", "typosquat"))
                         break

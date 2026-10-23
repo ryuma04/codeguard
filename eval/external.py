@@ -25,13 +25,15 @@ import re
 import subprocess
 import sys
 import sysconfig
+import time
+import urllib.error
 import urllib.request
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 EXT = os.path.join(ROOT, "data", "external")
 RAW = os.path.join(EXT, "raw")
 GD_DIR = os.path.join(RAW, "guarddog", "tests", "analyzer", "sourcecode")
-HF_ROWS = "https://datasets-server.huggingface.co/rows?dataset=deepset/prompt-injections&config=default&split={}&offset={}&length=100"
+HF_API = "https://datasets-server.huggingface.co/rows?dataset={}&config=default&split={}&offset={}&length=100"
 
 # GuardDog rule -> our categories ([] = we only score the verdict for it)
 GD_CATS = {
@@ -63,20 +65,50 @@ def fetch():
         subprocess.check_call(["git", "clone", "-q", "--depth", "1", "--filter=blob:none", "--sparse",
                                "https://github.com/DataDog/guarddog.git", gd])
         subprocess.check_call(["git", "-C", gd, "sparse-checkout", "set", "tests/analyzer/sourcecode"])
+    counts = {}
+    for name, dataset, splits, raw_file in (
+            ("prompt_injections", "deepset/prompt-injections", ("train", "test"), None),
+            ("securityeval", "s2e-lab/SecurityEval", ("train",), "dataset.jsonl"),
+            ("cybernative", "CyberNative/Code_Vulnerability_Security_DPO", ("train",), "secure_programming_dpo.json")):
+        out = os.path.join(RAW, f"{name}.jsonl")
+        if os.path.exists(out):
+            continue
+        if raw_file:  # one request for the whole file instead of paging the (rate-limited) rows API
+            url = f"https://huggingface.co/datasets/{dataset}/resolve/main/{raw_file}"
+            with urllib.request.urlopen(url, timeout=120) as r:
+                text = r.read().decode("utf-8")
+            try:
+                rows = json.loads(text)
+            except ValueError:  # JSON-lines (CyberNative ships .json that is really .jsonl)
+                rows = [json.loads(l) for l in text.splitlines() if l.strip()]
+        else:
+            rows = _hf_rows(dataset, splits)
+        with open(out, "w", encoding="utf-8") as f:
+            for r in rows:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        counts[name] = len(rows)
+    print(f"guarddog fixtures: {len(os.listdir(GD_DIR))} files; HF rows fetched: {counts or 'already cached'}")
+
+
+def _hf_rows(dataset, splits):
     rows = []
-    for split in ("train", "test"):
+    for split in splits:
         off = 0
         while True:
-            with urllib.request.urlopen(HF_ROWS.format(split, off), timeout=30) as r:
-                page = json.loads(r.read())
+            for attempt in range(5):  # the rows API returns occasional 5xx under load
+                try:
+                    with urllib.request.urlopen(HF_API.format(dataset, split, off), timeout=60) as r:
+                        page = json.loads(r.read())
+                    break
+                except urllib.error.HTTPError as e:
+                    if e.code < 500 or attempt == 4:
+                        raise
+                    time.sleep(2 * (attempt + 1))
             rows += [dict(x["row"], split=split) for x in page["rows"]]
             off += 100
             if off >= page["num_rows_total"]:
                 break
-    with open(os.path.join(RAW, "prompt_injections.jsonl"), "w", encoding="utf-8") as f:
-        for r in rows:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
-    print(f"guarddog fixtures: {len(os.listdir(GD_DIR))} files; prompt-injection rows: {len(rows)}")
+    return rows
 
 
 # ---------------------------------------------------------------- GuardDog fixtures
@@ -224,9 +256,40 @@ def build_benign(n=600, seed=7):
     return recs
 
 
+# ---------------------------------------------------------------- vulnerable (not malicious) code
+def _strip_fence(code):
+    m = re.search(r"```[\w+#-]*\n(.*?)(```|$)", code, re.S)
+    return (m.group(1) if m else code).strip("\n")
+
+
+def build_vulnerable():
+    """SecurityEval insecure code + CyberNative vulnerable/fixed pairs.
+
+    These are insecure-but-not-malicious (CWE bugs). Labelled benign: a guard for
+    *malicious* behaviour should mostly let them run. The `group` field says which
+    source/variant a record is, so block rates can be read per group.
+    """
+    recs = []
+    with open(os.path.join(RAW, "securityeval.jsonl"), encoding="utf-8") as f:
+        for r in map(json.loads, f):
+            recs.append({"id": f"se/{r['ID']}", "code": r["Insecure_code"], "label": "benign", "categories": [],
+                         "rule": f"securityeval/{r['ID'].split('_')[0]}", "group": "securityeval-insecure"})
+    rng = random.Random(11)
+    with open(os.path.join(RAW, "cybernative.jsonl"), encoding="utf-8") as f:
+        rows = [json.loads(l) for l in f]
+    rng.shuffle(rows)
+    for i, r in enumerate(rows[:800]):
+        for variant in ("chosen", "rejected"):
+            recs.append({"id": f"cn/{i}/{variant}", "code": _strip_fence(r[variant]), "label": "benign", "categories": [],
+                         "rule": f"cybernative/{r['lang']}",
+                         "group": "cybernative-fixed" if variant == "chosen" else "cybernative-vulnerable"})
+    return recs
+
+
 def build():
     os.makedirs(EXT, exist_ok=True)
-    for name, fn in (("guarddog", build_guarddog), ("prompt_injections", build_injections), ("benign_oss", build_benign)):
+    for name, fn in (("guarddog", build_guarddog), ("prompt_injections", build_injections), ("benign_oss", build_benign),
+                     ("vulnerable_code", build_vulnerable)):
         recs = fn()
         with open(os.path.join(EXT, f"{name}.jsonl"), "w", encoding="utf-8") as f:
             for r in recs:

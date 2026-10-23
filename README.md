@@ -25,7 +25,12 @@ python -m codeguard some_file.py          # CLI, exit code 2 on block
      - download→save→run detection;
      - DNS-exfiltration lookups;
      - loop analysis.
-   - `analyzers/structured.py`: SQL statements, YAML `run:`/`command:` extraction, Markdown fenced code, typosquatting.
+   - `analyzers/structured.py`: SQL statements, YAML `run:`/`command:` extraction, Markdown fenced code, and **package reputation** for `pip`/`npm`/`yarn`/`pnpm`/`uv`/`poetry` installs:
+     - exact match against 1,816 PyPI + 46,546 npm known-malicious names;
+     - version-specific match for compromised releases;
+     - typosquat check against the top 1,000 PyPI projects (the top 15,000 count as known-good).
+
+     Lists live in `codeguard/data/` and are built by `eval/build_pkg_lists.py`.
 5. **AI-instruction detector** (`injection.py`) — comments/strings/prose stream, zero-width/bidi chars, hidden HTML comments. Phrase rules first, then a **learned text classifier** (`textclf.py`) as a second opinion on every comment block / docstring / string.
 6. **Decision** — GuardDog-style correlation (capability alone ≤ 0.45, threat + capability → block), combos (secret + network ⇒ exfiltration), fail-closed on errors. Threshold 0.5.
 7. **ML stacker** (`ml.py`) — logistic regression over the earlier layers' signals (per-category threat/capability strength, finding counts, decode depth, string entropy, language). Consulted **only** when the rule risk is in the ambiguous band 0.3–0.7, and only acts when it is ≥ 0.9 sure.
@@ -61,6 +66,7 @@ Full method and per-rule tables are in [TESTING.md](TESTING.md).
 | DataDog GuardDog rule fixtures, all rules | 196 mal / 68 benign | **0.98** | 0.51 | 2.9% | many rules are out of our scope (screenshots, clipboard, setup.py `os.system("ls")`) |
 | GuardDog, rules in our 9 categories | 114 mal | – | **0.76** | – | |
 | `deepset/prompt-injections` **test split** in code comments | 60 inj / 56 benign | **0.98** | 0.72 | 1.8% | the train split was used to train the classifier |
+| Vulnerable-but-not-malicious code: SecurityEval (121) + CyberNative vulnerable/fixed pairs (1,600, C/C++/Java/C#/PHP/Ruby/Go/JS/Python…) | 1,721 benign | – | – | 2.0% blocked | most blocks are code that literally contains `rm -rf /` or `DROP TABLE` payloads; see TESTING.md |
 | Hand-written holdout (`eval/holdout.py`) | 46 mal / 30 benign | 1.00 | 1.00 | 0% | optimistic: used to find rule gaps and to train the stacker |
 
 What changed during testing:
@@ -72,7 +78,7 @@ What changed during testing:
 
 Ablation on the holdout: rules only reach recall 0.76; adding the structural layers reaches 1.00 at precision 1.00. The stacker changes nothing there, which is expected: it only acts on borderline scores.
 
-Efficiency: pure Python, no GPU, no network. Median latency 0.5–3 ms per snippet, p95 7–12 ms. The slowest cases are 300–800-line shell scripts, up to ~110 ms. Model files total ~650 KB.
+Efficiency: pure Python, no GPU, no network. Median latency 0.5–3 ms per snippet, p95 7–12 ms. The slowest cases are 300–800-line shell scripts, up to ~110 ms. Model files total ~650 KB, and the package-reputation lists in `codeguard/data/` ~1.3 MB (loaded once, on first use).
 
 ## Components & licenses
 | Component | Use | License |
@@ -82,6 +88,10 @@ Efficiency: pure Python, no GPU, no network. Median latency 0.5–3 ms per snipp
 | scikit-learn | trains both models offline (not needed at runtime) | BSD-3 |
 | DataDog GuardDog | capability/threat idea + rule ideas, adapted not copied; its rule-test fixtures used **as a test set only** | Apache-2.0 |
 | deepset/prompt-injections (Hugging Face) | train split trains the injection classifier; test split for evaluation | Apache-2.0 |
+| DataDog malicious-software-packages-dataset | **only** the `manifest.json` package-name lists, shipped in `codeguard/data/malicious_*.txt` / `compromised_*.txt`; malware samples are never downloaded | Apache-2.0 |
+| hugovk/top-pypi-packages | top-15,000 PyPI project names (`codeguard/data/top_pypi.txt`) | no license file; we use only the names, which are public PyPI download statistics |
+| s2e-lab/SecurityEval (Hugging Face) | test set only, not redistributed | no license declared |
+| CyberNative/Code_Vulnerability_Security_DPO (Hugging Face) | test set only | Apache-2.0 |
 | Gitleaks / Yelp detect-secrets | secret-pattern ideas, adapted | MIT / Apache-2.0 |
 | Meta LlamaFirewall | two-stream (code vs comments) idea | MIT |
 
@@ -92,7 +102,8 @@ No pretrained model weights are used. Both models are trained by us.
 - The stacker is trained on very little data (76 snippets), so it only acts on confident calls in the ambiguous band.
 - The injection classifier misses about 28% of real-world injections, mostly German text and indirect role-play prompts. Very long comment blocks (>2,000 chars) are not classified.
 - Out of scope by design: screenshots, clipboard reads, and plain `os.system` calls in `setup.py` (GuardDog flags these; our 9 categories don't cover them).
-- The typosquat check compares against a small top-package list.
+- Package reputation is a snapshot. New malicious packages are only caught if their name looks like a top-1,000 project, and that heuristic alone catches just 5.6% of known-malicious PyPI names. Legit packages outside the top 15,000 that are one or two letters away from a popular name can be flagged (~3% in our test). npm typosquatting uses only a ~50-name list.
+- Insecure-but-not-malicious code (SQL injection, unsafe deserialization, weak crypto) is mostly allowed. We block only when the code itself carries a destructive payload or runs untrusted input with `eval`.
 - Reading a secret env var alone (e.g. `os.getenv("API_KEY")`) is allowed. It blocks only when the value is printed, written or sent, to keep false positives low on normal config code.
 - Admin tools that legitimately touch `~/.ssh` / `~/.gnupg` (e.g. `ssh-copy-id`) are flagged.
 - The demo pair is our own placeholder until the organizers share theirs.

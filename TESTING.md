@@ -60,6 +60,41 @@ Separation rules:
 
 The interception demo still passes (`python demo/intercept_check.py` prints PASS).
 
+## Round 3: user-suggested datasets
+
+| Dataset | Decision | Why |
+|---|---|---|
+| hugovk/top-pypi-packages | **runtime**: top-15k known-good, top-1k typosquat targets | replaces a ~90-name list |
+| DataDog/malicious-software-packages-dataset | **runtime, names only** (`manifest.json`) | 1,816 PyPI + 46,546 npm malicious names, 2,092 compromised releases matched by version only. Samples are real malware in password-protected zips: not downloaded |
+| deepset/prompt-injections | already used | trains the injection classifier |
+| CyberNative/Code_Vulnerability_Security_DPO | **test only** | vulnerable vs fixed code written by an LLM: buggy, not malicious, so it can't teach "malicious" |
+| s2e-lab/SecurityEval | **test only** | insecure code by CWE, no license declared |
+
+Built by `python eval/build_pkg_lists.py` (package lists) and `python eval/external.py fetch && build` → `data/external/vulnerable_code.jsonl`.
+
+**Vulnerable-code block rate** (all labelled benign, because the intent isn't malicious):
+
+| Group | Blocked |
+|---|---|
+| CyberNative, fixed versions (800) | 2.0% |
+| CyberNative, vulnerable versions (800) | 2.4% |
+| SecurityEval insecure code (121) | 0% |
+
+Weaknesses found and fixed:
+- The injection classifier fired on short UI strings ("You are too young!"), so it now needs ≥ 6 words.
+- Any `ldap://` URL counted as SSRF. It's now limited to gopher/dict/tftp, `file:///` system paths, and `${jndi:…}` lookups.
+- Binary data written as `\x..` escapes counted as obfuscated execution. It's now below the block threshold on its own.
+
+Most remaining blocks are code that literally contains `system('rm -rf /')` or `'; DROP TABLE users; --` as a payload fed to `eval`/SQL. Running that in an agent sandbox could really cause damage, so we keep blocking it.
+
+**Package reputation check**:
+- Known-malicious and compromised names: exact match, so not a measure of generalization.
+- Typosquat heuristic alone, as if the name were new: 102/1,816 (5.6%) of known-malicious PyPI names. Most malicious packages use fresh names rather than look-alikes, which is why the name list matters.
+- Legit mid-popularity names (ranks 1,000–15,000) the heuristic would flag if they weren't on the known-good list: 3.0%. At runtime they *are* on the list, so they're allowed.
+- Latency for an unknown package name: 80 ms down to ~2 ms (early-exit edit distance, precomputed targets).
+
+Re-check after round 3: library-code false alarms 0.5% (unchanged), GuardDog precision 0.98 / recall 0.50, deepset test split precision 0.98 / recall 0.72 (unchanged), holdout 1.00 / 1.00, demo PASS.
+
 ## What is still missed, and why
 
 - **GuardDog out-of-scope rules** (12/82 caught): screenshots, clipboard, steganography, `cmd-overwrite`, and DLL hijacking via ctypes. Their "malicious" cases are often harmless commands like `os.system("ls")` in a `setup.py`, which GuardDog flags because of *where* they run. Our task judges what the code does, so these stay allowed on purpose.

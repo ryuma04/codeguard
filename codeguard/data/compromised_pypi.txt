@@ -1,0 +1,18 @@
+durabletask 1.4.1 1.4.2 1.4.3
+elementary-data 0.23.3
+embiggen 0.11.97
+ensmallen 0.8.101
+gpsea 0.9.14
+guardrails-ai 0.10.1
+lightning 2.6.2 2.6.3
+litellm 1.82.7 1.82.8 1.107.0
+memoryos 2.0.34
+mflux-streamlit 0.0.3 0.0.4
+mistralai 2.4.6
+nhmpy 2.4.7
+num2words 0.5.15 0.5.16
+ppkt2synergy 0.1.1
+pyphetools 0.9.120
+telnyx 4.87.1 4.87.2
+ultralytics 8.3.41 8.3.42 8.3.45 8.3.46
+xinference 2.6.0 2.6.1 2.6.2

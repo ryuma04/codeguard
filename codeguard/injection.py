@@ -86,7 +86,7 @@ def _classify(stream):
     thr, hits = textclf.threshold(), []
     for block in blocks:
         text = " ".join(t for _, t in block)
-        if len(text.split()) < 4 or len(text) > 2000:
+        if len(text.split()) < 6 or len(text) > 2000:  # short UI strings ("You are too young!") are not instructions
             continue
         p = textclf.score(text)
         if p is not None and p >= thr:

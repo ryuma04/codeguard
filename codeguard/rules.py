@@ -75,7 +75,7 @@ RULES = [
     ("obfuscated_execution", T, 0.70, r"(exec|eval)\s*\(\s*(['\"]\s*\+|\w+\s*\+\s*\w+|chr\(|''\.join|\"\"\.join|\w+\[::-1\])", "executes a dynamically built string"),
     ("obfuscated_execution", T, 0.65, r"getattr\(\s*(__builtins__|builtins|os|subprocess|__import__\([^)]*\))\s*,\s*[^'\")]|__import__\(\s*['\"][^'\"]+['\"]\s*\)\.(system|popen|exec|startfile|spawn)|(__dict__\s*\[\s*['\"]|__getattribute__\(\s*['\"])(system|popen|startfile|spawn\w*|exec\w*|eval|Popen|check_output|getoutput|remove|rmtree|unlink)['\"]|__import__\([^'\"\n]*[+\]]|globals\(\)\[[^\]]*\]\(|__builtins__\[|__subclasses__\(\)", "hides an import/function name at runtime"),
     ("obfuscated_execution", T, 0.60, r"\b_0x[0-9a-fA-F]{4,}\b", "JavaScript identifier mangling"),
-    ("obfuscated_execution", T, 0.60, r"(\\x[0-9a-fA-F]{2}){12,}|(chr\(\d+\)\s*\+\s*){6,}|String\.fromCharCode\((\s*\d+\s*,){8,}", "long escaped/char-coded string"),
+    ("obfuscated_execution", T, 0.45, r"(\\x[0-9a-fA-F]{2}){12,}|(chr\(\d+\)\s*\+\s*){6,}|String\.fromCharCode\((\s*\d+\s*,){8,}", "long escaped/char-coded string"),
     ("obfuscated_execution", T, 0.55, r"\bcurl\b[^\n]*\|\s*(python3?|node|perl|ruby|php)\b|\b(python3?|perl|ruby)\s+-c\s+['\"][^'\"]*(exec|eval|base64)", "pipes remote/decoded code into an interpreter"),
     ("obfuscated_execution", C, 0.30, r"\b(eval|exec)\s*\(|\bcompile\(|new\s+Function\(|\bvm\.run|\bsetTimeout\(\s*['\"]", "dynamic code execution"),
 
@@ -99,7 +99,7 @@ RULES = [
     # ---------------- ssrf_network_exfil ----------------
     ("ssrf_network_exfil", T, 0.90, r"169\.254\.169\.254|169\.254\.170\.2|metadata\.google\.internal|100\.100\.100\.200|fd00:ec2::254|metadata\.azure\.com|/computeMetadata/v1|/latest/meta-data|/metadata/instance", "queries a cloud metadata endpoint"),
     ("ssrf_network_exfil", T, 0.85, r"/dev/tcp/|/dev/udp/|\b(nc|ncat|netcat)\b[^\n]*\s-(e|c)\s*\S*(sh|bash|cmd)|\bsocat\b[^\n]*exec:|pty\.spawn\(|os\.dup2\(\s*\w*(sock|conn|client|\bs)\w*\.fileno|mkfifo[^\n]*\|\s*(ba)?sh|Net\.Sockets\.TCPClient", "reverse shell"),
-    ("ssrf_network_exfil", T, 0.65, r"\b(gopher|dict|ldap|tftp)://|\bfile:///(etc|proc|root|home|var|c:)", "dangerous URL scheme"),
+    ("ssrf_network_exfil", T, 0.65, r"\b(gopher|dict|tftp)://|\bfile:///(etc|proc|root|home|var|c:)|\$\{jndi:(ldap|rmi|dns)", "dangerous URL scheme / JNDI lookup"),
     ("ssrf_network_exfil", T, 0.50, r"https?://(localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|\[::1?\]|0x7f|2130706433)(:\d+)?/(admin|internal|debug|actuator|_|env|metrics|api/v\d/(secrets|keys))", "calls an internal admin endpoint"),
     ("ssrf_network_exfil", T, 0.45, r"https?://(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})", "calls a private-network address"),
     ("ssrf_network_exfil", T, 0.55, r"kubernetes\.default(\.svc)?|/var/run/secrets/kubernetes\.io|:2375\b|:10250\b|:6443\b", "reaches cluster/docker control plane"),
