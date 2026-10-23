@@ -67,6 +67,16 @@ def main():
         ok &= check(f"blocks: {code}", "dependency_risk" in analyze(code)["categories"], analyze(code))
     ok &= check("plain Invoke-WebRequest -OutFile is allowed",
                 analyze("Invoke-WebRequest https://example.test/file.zip -OutFile file.zip")["verdict"] == "allow")
+    # 9. Team-case findings: Path.joinpath key paths and secret-named files block; harmless env use does not.
+    for code in ['from pathlib import Path\nprint(Path.home().joinpath(".ssh", "id_rsa").read_text())',
+                 'import os\nkey = open(os.path.expanduser("~/.config/app/token.txt")).read()\nprint(key)',
+                 'import os\nprint(os.environ.get("APP_MODE"), os.environ["DB_PASSWORD"])']:
+        ok &= check(f"blocks: {code.splitlines()[-1][:60]}", analyze(code)["verdict"] == "block", analyze(code)["reason"])
+    for code in ['import os\nmode = os.environ.get("APP_MODE", "development")\nprint(mode)',
+                 'import os\nconfigured = bool(os.environ.get("SERVICE_TOKEN"))\nprint("token configured:", configured)',
+                 'import os\nnames = sorted(os.environ.keys())\nprint(names)',
+                 'import json\ncfg = json.load(open("tokenizer.json"))']:
+        ok &= check(f"allows: {code.splitlines()[-1][:60]}", analyze(code)["verdict"] == "allow", analyze(code)["reason"])
     print("\nALL PASS" if ok else "\nSOME FAILED")
     sys.exit(0 if ok else 1)
 

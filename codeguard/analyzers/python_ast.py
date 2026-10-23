@@ -40,6 +40,15 @@ DELETE_CALLS = {"shutil.rmtree", "os.remove", "os.unlink", "os.rmdir", "os.remov
 SENSITIVE_PATH = re.compile(r"(\.ssh|\.aws|\.gnupg|\.kube|\.docker/config|\.netrc|\.git-credentials|/etc/shadow|/etc/passwd|\.env\b|id_rsa|id_ed25519|Login Data|Cookies|wallet|\.npmrc|\.pypirc|credentials)", re.I)
 ROOTISH = re.compile(r"^\s*(/|/\*|~|~/|~/\*|/home/?|/root/?|/etc/?|/usr/?|/var/?|/boot/?|[A-Za-z]:\\?\\?)\s*$")
 _SECRET_NAME = re.compile(r"(secret|token|passw|api_?key|private_?key|credential|aws_|auth)", re.I)
+# A file whose *name* says it holds a secret (token.txt, api_key, secrets.json, server.pem). Whole-word match,
+# so tokenizer.json or passwordless_setup.md do not count. Weaker than SENSITIVE_PATH: reading alone does not block.
+_SECRET_FILE = re.compile(r"(?<![a-z])(tokens?|secrets?|credentials?|api[_-]?keys?|passwords?|passwd)(?![a-z])|\.(pem|key|p12|pfx|kdbx)$", re.I)
+# Wrapping a secret in these leaks nothing: bool(os.getenv("TOKEN")) only says whether it is set.
+_NON_LEAKING = {"bool", "len", "isinstance", "callable", "hasattr", "type", "id", "hash"}
+
+
+def _secret_file(path):
+    return bool(_SECRET_FILE.search(path.replace("\\", "/").rsplit("/", 1)[-1]))
 _UNSET = object()
 
 
@@ -182,6 +191,10 @@ class PythonAnalyzer(ast.NodeVisitor):
                 return "/".join(args)
             if fn in ("pathlib.Path.home", "Path.home"):
                 return "~"
+            if meth == "joinpath" and args and all(isinstance(a, str) for a in args):
+                base = self.fold(node.func.value, depth + 1)  # Path.home().joinpath(".ssh", "id_rsa")
+                if isinstance(base, str):
+                    return base.rstrip("/") + "/" + "/".join(args)
             if fn in ("pathlib.Path", "Path", "pathlib.PurePath") and args and all(isinstance(a, str) for a in args):
                 return "/".join(args)
             if fn == "bytes" and isinstance(a0, list) and all(isinstance(x, int) for x in a0):
@@ -227,35 +240,75 @@ class PythonAnalyzer(ast.NodeVisitor):
                 sub.id if isinstance(sub, ast.Name) else sub.attr if isinstance(sub, ast.Attribute) else None
             if txt and _SECRET_NAME.search(txt):
                 return True
-            if isinstance(sub, ast.Name) and self.tainted.get(sub.id, "file contents") != "file contents":
+            if isinstance(sub, ast.Name) and not self.tainted.get(sub.id, "file contents").startswith(("file contents", "non-secret")):
                 return True
         return False
+
+    def _env_key(self, sub):
+        """The variable name an env read asks for, if it is a literal: os.environ["X"] / .get("X") / getenv("X")."""
+        if isinstance(sub, ast.Subscript):
+            k = self.fold(sub.slice)
+        elif isinstance(sub, ast.Call) and sub.args:
+            k = self.fold(sub.args[0])
+        else:
+            return None
+        return k if isinstance(k, str) else None
 
     def _names_in(self, node):
         return {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
 
     def _is_secret_source(self, node):
-        """Does this expression read secrets / sensitive files?"""
+        """Does this expression read secrets / sensitive files?
+
+        Returns the strongest reason found. Weak reasons ("file contents", "non-secret env var X")
+        only count if nothing stronger is in the expression.
+        """
+        if isinstance(node, ast.Compare) or isinstance(node, ast.Call) and (self.resolve(node.func) or "") in _NON_LEAKING:
+            return None  # bool(os.getenv("TOKEN")), len(...), x is None: a yes/no, not the secret
+        # os.environ used only for its names (.keys(), `k in os.environ`) reveals no values.
+        names_only = {id(n.value) for n in ast.walk(node) if isinstance(n, ast.Attribute) and n.attr == "keys"}
+        names_only |= {id(c) for n in ast.walk(node) if isinstance(n, ast.Compare)
+                       and any(isinstance(o, (ast.In, ast.NotIn)) for o in n.ops) for c in n.comparators}
+        weak = None
+        skip = set()  # sub-nodes of an env read already judged non-secret (its inner `os.environ` must not re-count)
         for sub in ast.walk(node):
+            if id(sub) in skip:
+                continue
+            env_key = None
             if isinstance(sub, ast.Subscript) and self.resolve(sub.value) == "os.environ":
+                env_key = self._env_key(sub)
+                if env_key is not None and not _SECRET_NAME.search(env_key):
+                    weak = weak or f"non-secret env var {env_key}"
+                    skip |= {id(x) for x in ast.walk(sub)}
+                    continue
                 return "environment variable"
             if isinstance(sub, ast.Call):
                 fn = self.resolve(sub.func) or ""
+                if fn in ("os.getenv", "os.environ.get"):
+                    env_key = self._env_key(sub)
+                    if env_key is not None and not _SECRET_NAME.search(env_key):
+                        weak = weak or f"non-secret env var {env_key}"
+                        skip |= {id(x) for x in ast.walk(sub)}
+                        continue
                 if fn in SECRET_SOURCES or fn == "dict" and sub.args and self.resolve(sub.args[0]) == "os.environ":
                     return "secret/environment"
                 if fn in FINGERPRINT:
                     return "host fingerprint (user/hostname)"
                 if fn in ("open", "io.open", "pathlib.Path", "builtins.open", "codecs.open") or fn.endswith((".read_text", ".read_bytes")):
                     p = self.fold(sub.args[0]) if sub.args else _UNSET
-                    if isinstance(p, str) and SENSITIVE_PATH.search(p):
+                    if isinstance(p, str) and (SENSITIVE_PATH.search(p) or _secret_file(p)):
                         return f"sensitive file {p}"
                     if p is _UNSET or isinstance(p, str):
-                        return "file contents"
-            if isinstance(sub, ast.Attribute) and self.resolve(sub) == "os.environ":
+                        weak = "file contents"
+            if isinstance(sub, ast.Attribute) and self.resolve(sub) == "os.environ" and id(sub) not in names_only:
                 return "environment"
             if isinstance(sub, ast.Name) and sub.id in self.tainted:
-                return self.tainted[sub.id]
-        return None
+                why = self.tainted[sub.id]
+                if why.startswith(("file contents", "non-secret")):
+                    weak = weak if weak == "file contents" else why
+                    continue
+                return why
+        return weak
 
     # ---------------- visitors ----------------
     def visit_Import(self, node):
@@ -413,6 +466,10 @@ class PythonAnalyzer(ast.NodeVisitor):
             p = self.fold(target) if target is not None else _UNSET
             if isinstance(p, str) and SENSITIVE_PATH.search(p) and not re.search(r"\.env\.(example|sample|template)", p):
                 self.add("secret_access", T, 0.8, node, f"reads credential file '{p}'")
+            elif isinstance(p, str) and _secret_file(p):
+                # Name-based only (token.txt, api_key): an app may read its own token. Below the block line
+                # on its own; printing or sending it (taint sinks) is what blocks.
+                self.add("secret_access", T, 0.45, node, f"reads secret-named file '{p}'")
 
         # --- leaking secrets to stdout/logs/files ---
         if fn in ("print", "logging.info", "logging.warning", "logging.debug", "pprint.pprint") or \
@@ -450,7 +507,7 @@ class PythonAnalyzer(ast.NodeVisitor):
             exprs = list(node.args) + [k.value for k in node.keywords]
             for e in exprs:
                 why = self._is_secret_source(e)
-                if why:
+                if why and not why.startswith("non-secret"):  # sending APP_MODE out is config, not exfiltration
                     w = 0.7 if why == "file contents" else 0.65 if why.startswith("host") else 0.9
                     self.add("data_exfiltration", T, w, node, f"sends {why} over the network")
                     if why.startswith(("environment", "secret", "sensitive")):

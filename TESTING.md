@@ -140,6 +140,26 @@ On the reviewer's other remarks:
 
 Pinned by `python eval/regressions.py` (7 checks). Full regression after the fixes: no change on any set (library code 3/659, GuardDog 98/2, vulnerable code 35, deepset test 0.98/0.72, holdout 100%, carrier 99–100%, demo PASS).
 
+## Round 6: team-written cases (`team_cases.jsonl`, 143 cases)
+
+Only 20 of the 90 "malicious" cases use our 9 categories (secret_access, data_exfiltration). The other 70 are vulnerability classes (command/SQL injection, unsafe deserialization, path traversal, user-supplied-URL SSRF, weak crypto, TLS/JWT). Those are insecure-but-not-malicious code, which we allow by design; they belong in the benign set. Six of our categories had no cases.
+
+In-scope results:
+
+| Group | Before | After |
+|---|---|---|
+| secret_access (10) | 8 blocked | **10 blocked** |
+| data_exfiltration (10) | 4 blocked | 4 blocked: the 6 misses POST constant strings and read no local data, so we treat their labels as debatable |
+| benign, safe-but-scary (53) | 3 false positives | **0 false positives** |
+
+Fixes (general, in `analyzers/python_ast.py`):
+- `Path(...).joinpath(".ssh", "id_rsa")` is folded like `Path / ".ssh"`.
+- Files whose **name** says they hold a secret (`token.txt`, `api_key`, `secrets.json`, `*.pem`) are sensitive. Reading one alone scores 0.45 (an app may read its own token); printing or sending it blocks. Whole-word match, so `tokenizer.json` doesn't count.
+- An env read is only a secret if the variable name looks like one: `APP_MODE` isn't; `DB_PASSWORD` is. The strongest reason in an expression wins, so `print(os.environ.get("APP_MODE"), os.environ["DB_PASSWORD"])` still blocks.
+- `bool(...)`, `len(...)`, comparisons, `os.environ.keys()` and `k in os.environ` reveal no secret values, so they are not leaks.
+
+Pinned by 7 new checks in `eval/regressions.py`. All other suites unchanged.
+
 ## What is still missed, and why
 
 - **GuardDog out-of-scope rules** (12/82 caught): screenshots, clipboard, steganography, `cmd-overwrite`, and DLL hijacking via ctypes. Their "malicious" cases are often harmless commands like `os.system("ls")` in a `setup.py`, which GuardDog flags because of *where* they run. Our task judges what the code does, so these stay allowed on purpose.
