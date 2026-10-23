@@ -23,7 +23,8 @@ Done earlier:
 
 1. **Organizer dev sample**: save it to `data/dev_sample.jsonl` and run `python eval/evaluate.py data/dev_sample.jsonl --errors`.
    Fix *general* gaps only. Never paste dev snippets into rules or training data.
-2. **Git + public repo**: the folder is not a git repo yet; the submission needs a public GitHub repo.
+2. **Repo hygiene**: the repo is at github.com/ryuma04/cognition. Make sure it is public before submission, and delete
+   `codeguard/embedded.py` (a truncated leftover that does not parse; `carriers.py` is the real extractor).
 3. **More training data for the stacker**: add your own labelled snippets (jsonl: code, label, categories) and run
    `python eval/train_ml.py data/extra.jsonl`. Hard benign examples matter most.
 4. **Injection recall** (0.72 on the unseen test split): add English code-comment style injections and multilingual data, then retrain.
