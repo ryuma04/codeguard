@@ -89,6 +89,13 @@ class Handler(BaseHTTPRequestHandler):  # ---------- stdlib flavour ----------
         pass
 
 
+class Server(ThreadingHTTPServer):
+    # The stdlib default backlog is 5: with ~16 concurrent clients, Windows drops the overflow and the
+    # client retries after ~1 s, so p95 jumped from ~25 ms to ~1 s. A judge script calling in parallel would see that.
+    request_queue_size = 256
+    daemon_threads = True
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="0.0.0.0")
@@ -96,7 +103,7 @@ def main():
     a = ap.parse_args()
     warmup()
     print(f"CodeGuard listening on http://{a.host}:{a.port}  (POST /analyze)", flush=True)
-    ThreadingHTTPServer((a.host, a.port), Handler).serve_forever()
+    Server((a.host, a.port), Handler).serve_forever()
 
 
 if __name__ == "__main__":

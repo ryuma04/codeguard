@@ -8,6 +8,13 @@
       "port": 8000
     },
     {
+      "name": "engine-test",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "codeguard.api", "--host", "127.0.0.1", "--port", "8010"],
+      "port": 8010,
+      "autoPort": false
+    },
+    {
       "name": "ui",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "ui", "run", "dev"],

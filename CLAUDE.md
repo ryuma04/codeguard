@@ -109,6 +109,9 @@ Before you call a change done, re-run: regressions, holdout, `data/external/beni
   the second one. If results look stale, check what's listening and restart.
 - The engine loads its models and lists in `warmup()` at server start, so the first request is not slow. Loading is lock-protected (threaded server).
 - `eval/holdout.py` contains attack strings, so scanning it (e.g. `codeguard bench eval/`) correctly blocks it.
+- The stdlib server's default listen backlog (5) made p95 ~1 s at 16+ parallel clients on Windows; `api.Server` sets 256.
+  Now ~300 req/s with 16–32 parallel clients. Robustness check: `python eval/stress_test.py [--url ...]`. Inputs of 1 MB or
+  10k+ lines take 1–3 s (no crash, schema always valid).
 
 ## Open work (priority order, more in NEXT_STEPS.md)
 1. Run the organizer dev sample: `python eval/evaluate.py data/dev_sample.jsonl --errors`. Fix only *general* gaps.
