@@ -195,6 +195,8 @@ def warmup():
 
 def analyze(code, threshold: float = BLOCK_THRESHOLD) -> dict:
     t0 = time.perf_counter()
+    if isinstance(code, str) and code.startswith("﻿"):  # a file-encoding BOM, not hidden text
+        code = code[1:]
     ctx, per_cat = run_layers(code)
     rule_risk = max(per_cat.values(), default=0.0)
     risk, ml_prob = rule_risk, None

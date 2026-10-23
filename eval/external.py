@@ -155,8 +155,11 @@ def build_guarddog():
         stem, ext = os.path.splitext(name)
         if ext not in (".py", ".js") or name.startswith("test_"):
             continue
-        with open(os.path.join(GD_DIR, name), encoding="utf-8", errors="replace") as f:
-            text = f.read()
+        try:
+            with open(os.path.join(GD_DIR, name), encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except OSError:
+            continue
         if not _has_annot(text):
             if stem.startswith("threat-"):  # whole-file positive fixtures
                 recs.append({"id": f"gd/{name}", "code": text, "label": "malicious",

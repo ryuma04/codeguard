@@ -58,6 +58,10 @@ def main():
     # 6. Python `from x import y` is not mistaken for a Dockerfile FROM line.
     ok &= check("python 'from flask import' stays python",
                 detect_language("from flask import Flask\napp = Flask(__name__)\n") == "python")
+    # 7. A leading BOM (Windows editors) is an encoding marker, not hidden text; one later in the code still blocks.
+    bom = analyze("﻿import os\nprint(os.getcwd())")
+    ok &= check("leading BOM allowed, language still python", bom["verdict"] == "allow" and bom["code_language"] == "python", bom)
+    ok &= check("BOM inside code still blocks", analyze("x = 1﻿\nprint(x)")["verdict"] == "block")
     print("\nALL PASS" if ok else "\nSOME FAILED")
     sys.exit(0 if ok else 1)
 

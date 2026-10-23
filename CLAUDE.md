@@ -59,6 +59,8 @@ python eval/regressions.py                 # must print ALL PASS
 python eval/evaluate.py                    # holdout
 cd ui && npm install && npm run dev        # http://localhost:3000
 ```
+Short forms from the repo root (`package.json` → `scripts/tasks.js`, Node stdlib only): `npm start` (engine + UI),
+`npm run demo`, `npm run check`, `npm run safe` / `unsafe`, `npm run scan -- <paths|-c code>`, `npm run i`. Table in README.md.
 Before you call a change done, re-run: regressions, holdout, `data/external/benign_oss.jsonl` (false-positive guard),
 `data/external/guarddog.jsonl`, `eval/carrier_test.py`, and both demos.
 

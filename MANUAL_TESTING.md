@@ -3,6 +3,17 @@
 Everything below runs locally. Commands assume you are in the `codeguard/` folder.
 Windows: run them in Git Bash, or swap `./cli/codeguard.exe` for `cli\codeguard.exe` in PowerShell.
 
+**Quick path (judging day):** every step below also has a short `npm run` form; the full table is in README.md.
+
+```bash
+npm start                         # engine + UI (Ctrl+C stops both)
+npm run demo                      # both interception proofs, must print PASS twice
+npm run safe                      # live: allowed, runs
+npm run unsafe                    # live: BLOCKED, never started
+npm run scan -- samples/          # a whole folder of snippets, one line each
+npm run i                         # paste snippets one after another (end each with a "." line)
+```
+
 ## 0. One-time setup
 
 | Need | Check | Install |
