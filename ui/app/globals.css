@@ -194,6 +194,7 @@ pre.code {
   padding: 12px 14px; font: 13px/1.6 var(--font-m);
 }
 pre.code .ln { display: inline-block; min-width: 2.6em; color: var(--danger); font-weight: 600; }
+pre.code .hit { background: var(--danger-fill); }
 
 .empty { text-align: left; }
 .empty p { margin: 0 0 10px; }

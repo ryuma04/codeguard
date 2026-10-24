@@ -39,6 +39,7 @@ export default function Home() {
   const [showJson, setShowJson] = useState(false);
   const [fixing, setFixing] = useState(null);   // the block being fixed: { categories, risk }
   const [outcome, setOutcome] = useState(null); // "fixed" | "still" after a re-check
+  const [viewing, setViewing] = useState(false); // option "View code": full listing, flagged lines marked
   const gutterRef = useRef(null);
   const editorRef = useRef(null);
 
@@ -67,6 +68,7 @@ export default function Home() {
       const data = await res.json();
       setResult(data);
       setActiveLine(null);
+      setViewing(false);
       setHistory((h) => [{ code, data, at: new Date().toLocaleTimeString() }, ...h].slice(0, 10));
       if (fixing) {
         setOutcome(data.verdict === "allow" ? "fixed" : "still");
@@ -228,8 +230,18 @@ export default function Home() {
               {blocked && !result.engine_error && (
                 <div className="toolbar">
                   <button className="btn btn-primary small" onClick={startFix}>✎ Edit &amp; re-check</button>
+                  <button className="btn btn-secondary small" onClick={() => setViewing((v) => !v)}>👁 {viewing ? "Hide" : "View"} code</button>
                   <button className="btn btn-secondary small" onClick={discard}>⛔ Block / discard</button>
                 </div>
+              )}
+              {blocked && viewing && (
+                <pre className="code" style={{ marginTop: 14 }}>
+                  {lines.map((l, i) => (
+                    <div key={i} className={flagged.has(i + 1) ? "hit" : ""}>
+                      <span className="ln">{flagged.has(i + 1) ? ">>" : ""}{i + 1}</span>{l}
+                    </div>
+                  ))}
+                </pre>
               )}
 
               <div className="risk">
