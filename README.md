@@ -131,7 +131,9 @@ Measured through HTTP with one worker: p50 ≈ 5.5 ms round-trip, ~120 checks/s.
 
 Both models are trained offline with scikit-learn and exported to JSON (`models/`). Inference is pure Python: scikit-learn is not needed at runtime.
 
-Response: `verdict, risk_score, categories, code_language, reason, vulnerable_lines` (+ `latency_ms`; `?debug=1` adds per-category scores, `rule_risk`, `ml_prob` and `evidence`).
+Response: `verdict, risk_score, categories, code_language, reason, vulnerable_lines` (+ `latency_ms`; `?debug=1` adds per-category scores, `rule_risk`, `ml_prob`, `language_support` and `evidence`).
+
+Request: `{"code": "..."}`. As a safety net for clients that name the field differently, `/analyze` also takes the snippet from `snippet`, `content`, `input`, `text` or `source`, from a bare JSON string, or from a plain-text (non-JSON) body. `/analyze/batch` takes `{"items": [...]}`, `{"snippets": [...]}` or a bare JSON array; each item may be a string or an object with any of those fields plus an optional `id`.
 
 `evidence` (debug only; the required schema is unchanged): for a block, up to 6 chains `{category, weight, reason, steps:[{line, role, label, via?, code}]}`, with role one of source / encoded / decoded / carrier / sink / finding. The AST layer records where a variable's secret, decoded or downloaded value came from, so a sink can point back to its source line. `vulnerable_lines` includes a chain's source lines, not only the sink.
 
