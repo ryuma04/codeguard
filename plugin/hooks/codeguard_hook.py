@@ -42,6 +42,7 @@ MAX_FILE = 512 * 1024
 
 SHELL_TOOLS = {"Bash", "PowerShell"}
 WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
+IGNORE_FILE = ".codeguardignore"
 
 # Short, safe-alternative guidance per category, so the retry is a fix and not an evasion.
 HINTS = {
@@ -96,6 +97,41 @@ def _apply_edits(original, edits):
     return text
 
 
+# Programs that execute the file they are given. Anything else (grep, cat, diff, ls, git, sed -n ...) only
+# reads its file arguments, so their contents are not code that is about to run.
+INTERPRETERS = {"python", "python3", "python2", "py", "pythonw", "node", "nodejs", "deno", "bun", "ts-node", "tsx",
+                "bash", "sh", "zsh", "dash", "ksh", "fish", "ruby", "perl", "php", "lua", "rscript",
+                "pwsh", "powershell", "cmd", "source", ".", "&", "call", "start"}
+_WRAPPERS = {"sudo", "env", "time", "nohup", "exec", "command", "nice", "xargs", "doas"}
+_INLINE = {"-c", "-e", "-m", "-r", "-command", "-encodedcommand", "-enc"}   # code/module given inline, not a file
+_RUNNABLE = re.compile(r"\.(sh|bash|py|ps1|psm1|bat|cmd|js|mjs|cjs|ts|rb|pl|php)$", re.I)
+
+
+def executed_files(cmd, cwd):
+    """Files a shell command will RUN: `python x.py`, `bash -x y.sh`, `./z.sh`, `source a.sh`, `& .\\b.ps1`."""
+    found = []
+    for seg in re.split(r"\|\||&&|[|;\n]", cmd):
+        toks = [next(t for t in m if t) for m in re.findall(r"""(?:"([^"]+)"|'([^']+)'|(\S+))""", seg)]
+        while toks and (toks[0] in _WRAPPERS or re.match(r"^[A-Za-z_]\w*=", toks[0])):
+            toks.pop(0)  # sudo / env / VAR=1 prefixes
+        if not toks:
+            continue
+        prog = os.path.basename(toks[0].replace("\\", "/")).lower()
+        prog = prog[:-4] if prog.endswith(".exe") else prog
+        if prog in INTERPRETERS:
+            for t in toks[1:]:
+                if t.lower() in _INLINE:
+                    break  # python -c "...", node -e "...", python -m pkg: the command text is the code
+                if t.startswith("-"):
+                    continue
+                if os.path.isfile(t if os.path.isabs(t) else os.path.join(cwd, t)):
+                    found.append(t)
+                    break
+        elif toks[0].startswith(("./", ".\\", "/", "~/")) or _RUNNABLE.search(toks[0]):
+            found.append(toks[0])  # the file itself is the program
+    return found
+
+
 def targets(tool, ti, cwd):
     """Return [(label, code)] to scan for this tool call."""
     if tool in SHELL_TOOLS:
@@ -103,16 +139,10 @@ def targets(tool, ti, cwd):
         out = [(f"{tool}: {cmd[:120]}", cmd)]
         if _OWN_CMD.search(cmd) and _OWN_FLAG.search(cmd) and not _CHAINING.search(cmd):
             return out  # e.g. --recheck on a quarantined file: it is analysed, not executed
-        # Also scan script files the command runs (python x.py, bash ./y.sh, node z.js, & .\a.ps1 ...).
-        seen = set()
-        for tok in re.findall(r"""(?:"([^"]+)"|'([^']+)'|(\S+))""", cmd):
-            tok = next(t for t in tok if t).strip("&;|()")
-            if not tok or tok.startswith("-") or tok in seen:
-                continue
-            path = tok if os.path.isabs(tok) else os.path.join(cwd, tok)
-            code = _read(path)
+        # Also scan the script files the command RUNS. Files it only reads (grep x.py, cat y.sh) are data.
+        for tok in dict.fromkeys(executed_files(cmd, cwd)):
+            code = _read(tok if os.path.isabs(tok) else os.path.join(cwd, tok))
             if code is not None:
-                seen.add(tok)
                 out.append((tok, code))
         return out
     path = ti.get("file_path") or ti.get("notebook_path") or ""
@@ -127,17 +157,7 @@ def targets(tool, ti, cwd):
     return [(path, _apply_edits(original, edits or []))]  # the file as it will look after the edit
 
 
-def ignored(path, root):
-    """File writes under patterns in <project>/.codeguardignore are not scanned (execution always is)."""
-    ign = os.path.join(root, ".codeguardignore")
-    if not path or not os.path.isfile(ign):
-        return False
-    try:
-        rel = os.path.relpath(os.path.abspath(os.path.join(root, path)), root).replace("\\", "/")
-    except ValueError:
-        return False
-    if rel.startswith("../"):
-        return False
+def _matches(ign, rel):
     with open(ign, encoding="utf-8") as f:
         for pat in (l.strip() for l in f):
             if not pat or pat.startswith("#"):
@@ -147,6 +167,31 @@ def ignored(path, root):
             if fnmatch.fnmatch(rel, pat) or fnmatch.fnmatch(os.path.basename(rel), pat):
                 return True
     return False
+
+
+def ignored(path, root):
+    """File writes matching a .codeguardignore are not scanned (execution always is).
+
+    Like .gitignore: every .codeguardignore from the file's folder up to the drive root applies, with
+    patterns relative to the folder it sits in. So a repo's ignore file works even when Claude's project
+    root is a parent folder. The ignore file itself is never ignored (see hook()).
+    """
+    if not path:
+        return False
+    full = os.path.abspath(path if os.path.isabs(path) else os.path.join(root, path))
+    if os.path.basename(full) == IGNORE_FILE:
+        return False
+    d = os.path.dirname(full)
+    while True:
+        ign = os.path.join(d, IGNORE_FILE)
+        if os.path.isfile(ign):
+            rel = os.path.relpath(full, d).replace("\\", "/")
+            if _matches(ign, rel):
+                return True
+        parent = os.path.dirname(d)
+        if parent == d:
+            return False
+        d = parent
 
 
 # ------------------------------------------------------------------ audit trail + per-session retry count
@@ -351,7 +396,13 @@ def hook():
     cwd = event.get("cwd") or os.getcwd()
     root = os.environ.get("CLAUDE_PROJECT_DIR") or cwd
     is_write = tool in WRITE_TOOLS
-    if is_write and (WRITE_MODE == "off" or ignored(ti.get("file_path") or ti.get("notebook_path"), root)):
+    target = ti.get("file_path") or ti.get("notebook_path") or ""
+    if is_write and os.path.basename(target) == IGNORE_FILE:
+        # An agent that could write .codeguardignore could switch scanning off for itself: always ask the user.
+        emit("ask", f"This edits {IGNORE_FILE}, which turns CodeGuard scanning off for the paths it lists. "
+                    "Only the user should change it.",
+             f"🛡 CodeGuard: confirm the change to {IGNORE_FILE} (it disables scanning for listed paths)")
+    if is_write and (WRITE_MODE == "off" or ignored(target, root)):
         sys.exit(0)
     if is_write and in_quarantine(ti.get("file_path") or "", root):
         # Saving the user's typed fix into quarantine: --recheck verifies it, and running it later is checked again.

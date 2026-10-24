@@ -134,10 +134,13 @@ Response: `verdict, risk_score, categories, code_language, reason, vulnerable_li
 ## Models
 | Model | File | Size | Trained on | Role |
 |---|---|---|---|---|
-| Injection text classifier: word 1–2 grams + char 3–5 grams, TF-IDF, logistic regression | `models/injection.json` | ~650 KB, 20k features | `deepset/prompt-injections` **train split** (Apache-2.0) + 4,000 comments/docstrings from stdlib modules not used in testing | scores comment/string text for `ai_targeted_instructions` |
+| Injection text classifier: word 1–2 grams + char 3–5 grams, TF-IDF, logistic regression | `models/injection.json` | ~1.3 MB, 40k features | `deepset/prompt-injections` **train split** ×3 (Apache-2.0) + 1,500 attack emails and all non-attack/normal emails from the **train slice** of `microsoft/llmail-inject-challenge` phase 2 (MIT) + 4,000 comments/docstrings from stdlib modules not used in testing | scores comment/string text for `ai_targeted_instructions` |
 | Stacker: logistic regression, 37 features | `models/stacker.json` | ~1 KB | 76-snippet hand-written holdout | tie-breaker for ambiguous risk 0.3–0.7 |
 
-Retrain: `python eval/train_injection.py` and `python eval/train_ml.py`.
+Retrain: `python eval/injection_data.py fetch`, then `python eval/train_injection.py --llmail 1500 --max-features 40000 --deepset-weight 3`, and `python eval/train_ml.py`.
+Compare candidates on held-out data, through the full engine: `python eval/compare_injection.py models/injection.json other.json`.
+
+Adding LLMail-Inject raised detection of realistic *indirect* injections (its held-out slice) from 25% to 95%, with no added false positives on real library code, vulnerable code, team benign cases or the holdout. Recall on deepset's test split moved from 72% to 68% (2 of 60). `yanismiraoui/prompt_injections` (7 languages) was tested too: it lifted multilingual recall to 89% but added false positives on ordinary non-English code strings, so it is used only as a test set. Details: TESTING.md, round 7.
 
 ## Evaluation
 ```bash
@@ -181,7 +184,7 @@ What changed during testing:
 
 Ablation on the holdout: rules only reach recall 0.76; adding the structural layers reaches 1.00 at precision 1.00. The stacker changes nothing there, which is expected: it only acts on borderline scores.
 
-Efficiency: pure Python, no GPU, no network. Median latency 0.5–3 ms per snippet, p95 7–12 ms. The slowest cases are 300–800-line shell scripts, up to ~110 ms. Model files total ~650 KB, and the package-reputation lists in `codeguard/data/` ~1.3 MB (loaded once, on first use).
+Efficiency: pure Python, no GPU, no network. Median latency 0.5–3 ms per snippet, p95 7–12 ms. The slowest cases are 300–800-line shell scripts, up to ~110 ms. Model files total ~1.3 MB, and the package-reputation lists in `codeguard/data/` ~1.3 MB (loaded once, on first use).
 
 ## Components & licenses
 | Component | Use | License |
@@ -194,6 +197,8 @@ Efficiency: pure Python, no GPU, no network. Median latency 0.5–3 ms per snipp
 | scikit-learn | trains both models offline (not needed at runtime) | BSD-3 |
 | DataDog GuardDog | capability/threat idea + rule ideas, adapted not copied; its rule-test fixtures used **as a test set only** | Apache-2.0 |
 | deepset/prompt-injections (Hugging Face) | train split trains the injection classifier; test split for evaluation | Apache-2.0 |
+| microsoft/llmail-inject-challenge (Hugging Face) | phase-2 labelled submissions + normal emails: 80% hashed train slice trains the injection classifier, 20% held out for testing | MIT |
+| yanismiraoui/prompt_injections (Hugging Face) | multilingual injections, **test only** (training on it added false positives) | Apache-2.0 |
 | DataDog malicious-software-packages-dataset | **only** the `manifest.json` package-name lists, shipped in `codeguard/data/malicious_*.txt` / `compromised_*.txt`; malware samples are never downloaded | Apache-2.0 |
 | hugovk/top-pypi-packages | top-15,000 PyPI project names (`codeguard/data/top_pypi.txt`) | no license file; we use only the names, which are public PyPI download statistics |
 | s2e-lab/SecurityEval (Hugging Face) | test set only, not redistributed | no license declared |
