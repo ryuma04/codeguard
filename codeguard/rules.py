@@ -26,7 +26,7 @@ RULES = [
     ("secret_access", T, 0.55, _ENV_READ + r"(AWS_SECRET\w*|AWS_ACCESS_KEY\w*|\w*PRIVATE_KEY|\w*CLIENT_SECRET)", "reads a cloud/private secret from the environment"),
     ("secret_access", T, 0.45, _ENV_READ + r"(\w*API_KEY|\w*SECRET\w*|\w*TOKEN|\w*PASSWORD|\w*PASSWD|DATABASE_URL)", "reads a secret environment variable"),
     ("secret_access", T, 0.65, r"(print|console\.log|echo|logger\.\w+|puts|Write-(Host|Output))\W[^\n]*(\benviron\s*\[|\bgetenv\s*\(|\bprocess\.env\.|\$\w*(TOKEN|SECRET|PASSWORD|API_KEY)\b)", "prints secrets from the environment"),
-    ("secret_access", T, 0.55, r"dict\(\s*os\.environ\s*\)|os\.environ\.copy\(\)|json\.dumps\(\s*(dict\()?os\.environ|JSON\.stringify\(\s*process(\.env|\[\s*['\"]env['\"]\s*\])\s*\)|(push|send|write|post)\([^\n]*\bprocess\.env\b(?!\.)|\bprintenv\b\s*(\||>|$)|\benv\s*\|", "dumps the whole environment"),
+    ("secret_access", T, 0.55, r"dict\(\s*os\.environ\s*\)|os\.environ\.copy\(\)|json\.dumps\(\s*(dict\()?os\.environ|JSON\.stringify\(\s*process(\.env|\[\s*['\"]env['\"]\s*\])\s*\)|(push|send|write|post)\([^\n]*\bprocess\.env\b(?!\.)|\bprintenv\b\s*(\||>|$)|(^|[;&(]\s*|\|\s*|\$\(\s*)env\s*\|(?!\|)", "dumps the whole environment"),
     ("secret_access", C, 0.20, r"os\.environ|os\.getenv|process\.env|\bgetenv\(", "reads environment variables"),
     ("secret_access", T, 0.50, r"(security\s+find-generic-password|secret-tool\s+lookup|keyring\.get_password|mimikatz|lsass)", "queries OS credential manager"),
 
@@ -38,6 +38,9 @@ RULES = [
     ("data_exfiltration", T, 0.60, r"(^|[;&|(]\s*)(nslookup|dig|host)\s+\S*(\$\(|`)|\.resolve\([^\n]*(b64|base64|hex)", "encodes data into DNS lookups"),
     ("data_exfiltration", T, 0.55, r"\b(scp|rsync)\b[^\n]*" + _HOME + r"?/?\.(ssh|aws|gnupg)", "copies credential folders to a remote host"),
     ("data_exfiltration", T, 0.60, r"(post|put|patch|request|send|connect)\w*\([^\n]*['\"](https?://)?(?!(10|127|0|192\.168|172\.(1[6-9]|2\d|3[01])|169\.254)\.)\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", "sends data to a hard-coded public IP"),
+    # Markdown image pointing at a tracking/collector endpoint with data in the query: rendering it leaks the data.
+    ("data_exfiltration", T, 0.60, r"!\[[^\]]*\]\(\s*https?://[^)\s]*?(pixel|beacon|track(ing|er)?|collect(or)?|telemetry)[^)\s]*\?[^)\s]*\w=[^)\s]+\)", "markdown image beacon sends data to a tracking endpoint"),
+    ("dependency_risk", T, 0.75, r"\bimport\(\s*['\"`]https?://", "imports and runs a module from a remote URL"),
     ("data_exfiltration", T, 0.35, r"os\.(hostname|userInfo|networkInterfaces)\(\)|getpass\.getuser\(\)|socket\.gethostname\(\)|platform\.node\(\)|os\.getlogin\(\)|\$env:(COMPUTERNAME|USERNAME)", "collects host fingerprint"),
     ("data_exfiltration", C, 0.20, r"requests\.(post|put|patch)|urllib\.request|urlopen\(|http\.client|httpx\.|aiohttp|\bfetch\(|axios|XMLHttpRequest|https?\.(request|get)\(|require\(['\"]https?['\"]\)|net\.connect|new\s+WebSocket|\bcurl\b|\bwget\b|Invoke-(WebRequest|RestMethod)|socket\.(socket|create_connection)|\.sendall\(|smtplib|ftplib|curl_exec|fsockopen|\b(nc|ncat|netcat|socat|telnet|scp|rsync|ssh)\s+\S", "makes an outbound network call"),
 
@@ -47,11 +50,14 @@ RULES = [
     ("destructive_command", T, 0.75, r"\brm\s+(-[a-zA-Z]*[rR][a-zA-Z]*\s+|--recursive\s+)(-[a-zA-Z]+\s+)*['\"]?/(etc|usr|boot|bin|sbin|lib|lib64|opt|srv|root|home|var/lib|var/www|var/backups|mnt|data)/", "recursively deletes a system/data directory"),
     ("destructive_command", T, 0.90, r"\bmkfs(\.\w+)?\b|\bdd\b[^\n]*of=/dev/(sd|hd|nvme|xvd|disk|mmcblk)|\bwipefs\b|\bshred\b[^\n]*(/dev/|-u)|>\s*/dev/(sd[a-z]|nvme\d|disk\d)", "overwrites or formats a disk"),
     ("destructive_command", T, 0.85, r"\bformat\s+[a-zA-Z]:|\bdel\s+/[sfq][^\n]*[a-zA-Z]:\\|\brd\s+/s\s+/q\s+[a-zA-Z]:\\|Remove-Item[^\n]*-Recurse[^\n]*(-Force)?[^\n]*([a-zA-Z]:\\|\$env:USERPROFILE|~)", "deletes a Windows drive/profile"),
-    ("destructive_command", T, 0.80, r"\bchmod\s+-R\s+[0-7]{3,4}\s+/(\s|$)|\bchown\s+-R\s+\S+\s+/(\s|$)", "recursively changes permissions on /"),
-    ("destructive_command", T, 0.80, r"\bDROP\s+(TABLE|DATABASE|SCHEMA|USER)\b|\bTRUNCATE\s+(TABLE\s+)?\w+", "drops or truncates database objects"),
+    ("destructive_command", T, 0.80, r"\bchmod\s+-R\s+[0-7]{3,4}\s+/((etc|usr|bin|sbin|boot|lib|lib64|var|root|home)/?)?(\s|$)|\bchown\s+-R\s+\S+\s+/((etc|usr|bin|sbin|boot|lib|var|root|home)/?)?(\s|$)", "recursively changes permissions on / or a system directory"),
+    # `DROP TABLE IF EXISTS tmp_x` on a temp/staging table is the idempotent-migration idiom, not destruction.
+    ("destructive_command", T, 0.80, r"\bDROP\s+(TABLE|DATABASE|SCHEMA|USER)\b(?!\s+IF\s+EXISTS\s+[\w.\"`\[\]]*?(te?mp|staging|scratch|_old\b|backup_))|\bTRUNCATE\s+(TABLE\s+)?\w+", "drops or truncates database objects"),
     ("destructive_command", T, 0.70, r"\bgit\s+push\s+[^\n]*(--force|-f)\b[^\n]*(main|master)|\bgit\s+(clean\s+-[a-z]*f[a-z]*d|reset\s+--hard\s+HEAD~\d{2,})", "rewrites/destroys git history"),
     ("destructive_command", T, 0.75, r"\bkill\s+-9\s+-1\b|\bkillall5\b|\bpkill\s+-9\s+-u\s+root|\b(shutdown|halt|poweroff|reboot)\b(\s+-[a-zA-Z]+|\s+now)?\s*$|init\s+0\b", "kills all processes / shuts the machine down"),
-    ("destructive_command", T, 0.65, r"(find\s+/[^\n]*-delete|find\s+/[^\n]*-exec\s+rm)", "mass-deletes files with find"),
+    # Only from / , home or a top-level system dir: `find /srv/app/backups -name '*.bak' -mtime +30 -delete` is retention cleanup.
+    ("destructive_command", T, 0.65, r"\bfind\s+['\"]?(/|~/?|\$HOME/?|/(etc|usr|var|home|boot|bin|sbin|lib|opt|srv|root)/?)['\"]?\s[^\n]*(-delete|-exec\s+rm)", "mass-deletes files with find"),
+    ("destructive_command", T, 0.90, r"\b(rmSync|rmdirSync|rimraf(\.sync)?|removeSync|remove|rm|rmdir|emptyDir(Sync)?)\(\s*['\"`](/|~|~/|[A-Za-z]:\\\\?|/(etc|usr|home|root|var|boot|bin|lib))['\"`]\s*[,)]", "recursively deletes root/home from code"),
     ("destructive_command", T, 0.70, r"\b(aws\s+s3\s+rb|aws\s+s3\s+rm[^\n]*--recursive|gsutil\s+(-m\s+)?rm\s+-r|kubectl\s+delete\s+(ns|namespace|--all)|terraform\s+destroy[^\n]*-auto-approve)", "deletes cloud resources"),
     ("destructive_command", T, 0.75, r"\b(FLUSHALL|FLUSHDB)\b|dropDatabase\(\)|\.drop\(\)", "wipes a datastore"),
     ("destructive_command", C, 0.30, r"\brm\s+-[a-zA-Z]*[rf]|shutil\.rmtree|os\.(remove|unlink|rmdir)|fs\.(rmSync|rmdirSync|unlinkSync|rm)\(|rimraf|Remove-Item|\bunlink\(", "deletes files"),

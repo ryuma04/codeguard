@@ -208,7 +208,10 @@ Efficiency: pure Python, no GPU, no network. Median latency 0.5–3 ms per snipp
 | DataDog malicious-software-packages-dataset | **only** the `manifest.json` package-name lists, shipped in `codeguard/data/malicious_*.txt` / `compromised_*.txt`; malware samples are never downloaded | Apache-2.0 |
 | hugovk/top-pypi-packages | top-15,000 PyPI project names (`codeguard/data/top_pypi.txt`) | no license file; we use only the names, which are public PyPI download statistics |
 | s2e-lab/SecurityEval (Hugging Face) | test set only, not redistributed | no license declared |
-| CyberNative/Code_Vulnerability_Security_DPO (Hugging Face) | test set only | Apache-2.0 |
+| CyberNative/Code_Vulnerability_Security_DPO (Hugging Face) | test set only (also language-detection accuracy, `eval/language_eval.py`) | Apache-2.0 |
+| leolee99/NotInject (Hugging Face) | test set only: benign prompts with injection trigger words | MIT |
+| perplexity-ai/browsesafe-bench (Hugging Face), test split | test set only: HTML pages with hidden prompt injections | MIT |
+| npm packages nanoid, chalk, p-limit, debug, ms, kleur, is-number | test set only: benign JavaScript, read as text from the registry tarballs | MIT |
 | Gitleaks / Yelp detect-secrets | secret-pattern ideas, adapted | MIT / Apache-2.0 |
 | Meta LlamaFirewall | two-stream (code vs comments) idea | MIT |
 

@@ -196,9 +196,24 @@ def extract_makefile_embedded(text):
             i += 1
 
 
+# ---------------------------------------------------------------- HTML
+_SCRIPT = re.compile(r"<script\b(?![^>]*\bsrc\s*=)[^>]*>(?P<body>.*?)</script\s*>", re.S | re.I)
+_ON_ATTR = re.compile(r"\son(?:load|error|click|mouseover|focus|submit)\s*=\s*(?P<q>['\"])(?P<body>.*?)(?P=q)", re.S | re.I)
+
+
+def extract_html_embedded(text):
+    """Inline <script> blocks and on*= event-handler attributes, as JavaScript."""
+    if not re.search(r"<\s*(script|[a-z]+\s[^>]*\son\w+\s*=)", text, re.I):
+        return
+    for rx in (_SCRIPT, _ON_ATTR):
+        for m in rx.finditer(text):
+            if len(m.group("body").strip()) >= 4:
+                yield _line_at(text, m.start("body")), "javascript", m.group("body")
+
+
 # ---------------------------------------------------------------- dispatcher
 _EXTRACTORS = (extract_json_embedded, extract_yaml_embedded, extract_dockerfile_embedded,
-               extract_makefile_embedded, extract_shell_embedded)
+               extract_makefile_embedded, extract_shell_embedded, extract_html_embedded)
 
 
 def extract_embedded(text, language):

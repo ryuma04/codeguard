@@ -14,7 +14,7 @@ from .carriers import extract_embedded
 from .injection import scan_injection
 from .analyzers.python_ast import analyze_python
 from . import ml
-from .analyzers.structured import analyze_sql, extract_yaml_shell, extract_markdown_code, check_typosquats
+from .analyzers.structured import analyze_sql, analyze_ci_yaml, extract_yaml_shell, extract_markdown_code, check_typosquats
 
 BLOCK_THRESHOLD = 0.5
 CAPABILITY_CAP = 0.45      # capabilities alone can never block
@@ -31,6 +31,14 @@ def _scan_shell_like(text, line_offset, ctx, source, depth):
     return hits
 
 
+_SQL_STRING = re.compile(r"'(?:[^']|'')*'")
+
+
+def _blank_sql_strings(text):
+    """Blank the inside of '...' literals, keeping line breaks so line numbers stay right."""
+    return _SQL_STRING.sub(lambda m: "'" + re.sub(r"[^\n]", " ", m.group(0)[1:-1]) + "'", text)
+
+
 def _analyze_chunk(text: str, language: str, line_offset: int, ctx: Context, depth: int = 0, skip_rules: bool = False):
     """Analyze one piece of code; recursion handles payloads, embedded code, decoded layers.
 
@@ -41,7 +49,10 @@ def _analyze_chunk(text: str, language: str, line_offset: int, ctx: Context, dep
     if depth > 4 or not text.strip():
         return
     if not skip_rules:
-        ctx.findings.extend(_scan_shell_like(text, line_offset, ctx, "rule", depth))
+        # In SQL a quoted string is data ('Example: DROP TABLE users'); analyze_sql still sees the whole
+        # statement, so commands run *from* SQL (COPY ... TO PROGRAM '...', xp_cmdshell '...') stay covered.
+        rule_text = _blank_sql_strings(text) if language == "sql" else text
+        ctx.findings.extend(_scan_shell_like(rule_text, line_offset, ctx, "rule", depth))
     if not LAYERS["structural"]:
         return
 
@@ -64,6 +75,10 @@ def _analyze_chunk(text: str, language: str, line_offset: int, ctx: Context, dep
             f.line += line_offset
             ctx.add(f)
     elif language == "yaml":
+        for f in analyze_ci_yaml(text):
+            f.line += line_offset
+            f.chain = [dict(s, line=s["line"] + line_offset) for s in f.chain]
+            ctx.add(f)
         for line, shell in extract_yaml_shell(text):
             sub = Context(shell)
             _analyze_chunk(shell, "bash", line - 1 + line_offset, sub, depth + 1)
@@ -148,12 +163,38 @@ def _combine(ctx: Context):
     if ctx.language in ("javascript", "powershell") and any(x.reason == "collects host fingerprint" for x in f) and has_net:
         line = min(x.line for x in f if x.reason == "collects host fingerprint")
         ctx.add(Finding("data_exfiltration", THREAT, 0.65, line, "collects user/host fingerprint and makes a network call", "combo"))
+    if ctx.language in ("javascript", "typescript"):
+        _js_variable_flows(ctx)
     m = re.search(r"detached\s*:\s*true", ctx.code)
     if m and re.search(r"\.unref\(\)", ctx.code) and re.search(r"stdio\s*:\s*['\"]ignore", ctx.code):
         ctx.add(Finding("persistence_or_privesc", THREAT, 0.65, ctx.code.count("\n", 0, m.start()) + 1,
                         "spawns a hidden, detached background process", "combo"))
     if "ssrf_network_exfil" in cats and any("metadata" in x.reason for x in f) and has_net:
         ctx.add(Finding("secret_access", THREAT, 0.6, 0, "pulls cloud credentials from the metadata service", "combo"))
+
+
+_JS_ASSIGN = r"(?:const|let|var)\s+(\w+)\s*=\s*(?:await\s+)?"
+
+
+def _js_variable_flows(ctx):
+    """Two JS flows the line rules miss because a variable sits between source and sink:
+    a decoded value later evaluated, and a remote URL later dynamically imported."""
+    code = ctx.code
+
+    def line(i):
+        return code.count("\n", 0, i) + 1
+    for m in re.finditer(_JS_ASSIGN + r"(atob\s*\(|Buffer\.from\s*\([^)]*['\"](base64|hex)['\"]|decodeURIComponent\s*\(|unescape\s*\()", code):
+        sink = re.search(rf"\b(eval|Function|vm\.run\w*|setTimeout|setInterval)\s*\(\s*{m.group(1)}\b", code[m.end():])
+        if sink:
+            chain = [{"line": line(m.start()), "role": "encoded", "label": f"'{m.group(1)}' holds decoded data"},
+                     {"line": line(m.end() + sink.start()), "role": "sink", "label": f"{sink.group(1)}() executes it", "via": m.group(1)}]
+            ctx.add(Finding("obfuscated_execution", THREAT, 0.85, chain[1]["line"], f"{sink.group(1)}() runs a decoded payload", "combo", chain))
+    for m in re.finditer(_JS_ASSIGN + r"['\"`](https?://[^'\"`]+)['\"`]", code):
+        sink = re.search(rf"\bimport\s*\(\s*{m.group(1)}\s*\)", code[m.end():])
+        if sink:
+            chain = [{"line": line(m.start()), "role": "source", "label": f"remote URL {m.group(2)[:60]}"},
+                     {"line": line(m.end() + sink.start()), "role": "sink", "label": "import() loads and runs it", "via": m.group(1)}]
+            ctx.add(Finding("dependency_risk", THREAT, 0.75, chain[1]["line"], "imports and runs a module from a remote URL", "combo", chain))
 
 
 def _score(findings):

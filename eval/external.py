@@ -11,6 +11,10 @@ Sources (used ONLY to measure the detector, never for rules or training):
   * deepset/prompt-injections on Hugging Face (Apache-2.0): text labelled
     injection / not. Each text is placed in a comment or docstring of a small
     harmless function, so it tests ai_targeted_instructions in a code setting.
+  * leolee99/NotInject on Hugging Face (MIT): 339 benign prompts built around injection trigger words,
+    to measure false positives (over-defense). Used as plain text and inside harmless code.
+  * perplexity-ai/browsesafe-bench on Hugging Face (MIT), test split: 3,680 HTML pages labelled for an
+    embedded prompt injection (hidden text, comments, attributes, with benign distractors).
   * Real library code already installed on this machine (Python stdlib: PSF;
     site-packages: each package's own OSS license): functions sampled as
     benign snippets, to measure false positives on code nobody wrote for us.
@@ -69,7 +73,9 @@ def fetch():
     for name, dataset, splits, raw_file in (
             ("prompt_injections", "deepset/prompt-injections", ("train", "test"), None),
             ("securityeval", "s2e-lab/SecurityEval", ("train",), "dataset.jsonl"),
-            ("cybernative", "CyberNative/Code_Vulnerability_Security_DPO", ("train",), "secure_programming_dpo.json")):
+            ("cybernative", "CyberNative/Code_Vulnerability_Security_DPO", ("train",), "secure_programming_dpo.json"),
+            ("notinject", "leolee99/NotInject", ("NotInject_one", "NotInject_two", "NotInject_three"), None),
+            ("browsesafe", "perplexity-ai/browsesafe-bench", ("test",), None)):
         out = os.path.join(RAW, f"{name}.jsonl")
         if os.path.exists(out):
             continue
@@ -95,15 +101,16 @@ def _hf_rows(dataset, splits):
     for split in splits:
         off = 0
         while True:
-            for attempt in range(5):  # the rows API returns occasional 5xx under load
+            for attempt in range(8):  # the rows API returns occasional 5xx under load, and 429 when paged fast
                 try:
-                    with urllib.request.urlopen(HF_API.format(dataset, split, off), timeout=60) as r:
+                    with urllib.request.urlopen(HF_API.format(dataset, split, off), timeout=120) as r:
                         page = json.loads(r.read())
                     break
                 except urllib.error.HTTPError as e:
-                    if e.code < 500 or attempt == 4:
+                    if (e.code < 500 and e.code != 429) or attempt == 7:
                         raise
-                    time.sleep(2 * (attempt + 1))
+                    wait = e.headers.get("Retry-After")
+                    time.sleep(int(wait) if wait and wait.isdigit() else 5 * (attempt + 1))
             rows += [dict(x["row"], split=split) for x in page["rows"]]
             off += 100
             if off >= page["num_rows_total"]:
@@ -203,6 +210,36 @@ def build_injections():
     return recs
 
 
+def _raw_rows(name):
+    path = os.path.join(RAW, f"{name}.jsonl")
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        return [json.loads(l) for l in f if l.strip()]
+
+
+def build_notinject():
+    """NotInject: benign prompts full of injection trigger words ("ignore", "bypass"). False-positive test only.
+    Each prompt goes in twice: as plain text (a message or doc an agent reads) and inside harmless code."""
+    rows = _raw_rows("notinject") or []
+    recs = []
+    for i, r in enumerate(rows):
+        text = " ".join(str(r["prompt"]).replace('"', "'").replace("*/", "").split())
+        for variant, code in (("text", str(r["prompt"])), ("code", _WRAPPERS[i % len(_WRAPPERS)](text))):
+            recs.append({"id": f"nij/{variant}/{i}", "code": code, "label": "benign", "categories": [],
+                         "rule": f"notinject/{r.get('category', '?')}", "group": f"notinject-{variant}"})
+    return recs
+
+
+def build_browsesafe():
+    """BrowseSafe-Bench test split: realistic HTML pages, label yes = a prompt injection is embedded
+    (hidden text, comments, attributes), no = benign page (often with injection-like distractors)."""
+    rows = _raw_rows("browsesafe") or []
+    return [{"id": f"bs/{i}", "code": r["content"], "label": "malicious" if r["label"] == "yes" else "benign",
+             "categories": ["ai_targeted_instructions"] if r["label"] == "yes" else [], "rule": "browsesafe",
+             "group": "browsesafe"} for i, r in enumerate(rows)]
+
+
 # ---------------------------------------------------------------- real benign library code
 PACKAGES = ["", "json", "http", "email", "logging", "concurrent", "asyncio", "urllib", "sqlite3", "importlib",
             "site-packages/fastapi", "site-packages/starlette", "site-packages/pydantic", "site-packages/sklearn/utils",
@@ -292,8 +329,11 @@ def build_vulnerable():
 def build():
     os.makedirs(EXT, exist_ok=True)
     for name, fn in (("guarddog", build_guarddog), ("prompt_injections", build_injections), ("benign_oss", build_benign),
-                     ("vulnerable_code", build_vulnerable)):
+                     ("vulnerable_code", build_vulnerable), ("notinject", build_notinject), ("browsesafe", build_browsesafe)):
         recs = fn()
+        if not recs:  # its raw download is missing: run `fetch` first
+            print(f"{name}.jsonl: skipped (no raw data)")
+            continue
         with open(os.path.join(EXT, f"{name}.jsonl"), "w", encoding="utf-8") as f:
             for r in recs:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")

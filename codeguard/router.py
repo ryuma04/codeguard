@@ -60,6 +60,7 @@ _SHEBANG_LANG = {"sh": "bash", "bash": "bash", "zsh": "bash", "dash": "bash", "k
                  "pwsh": "powershell", "powershell": "powershell", "Rscript": "r", "elixir": "elixir", "julia": "julia",
                  "ocaml": "ocaml", "runhaskell": "haskell", "swift": "swift", "groovy": "groovy", "kotlin": "kotlin",
                  "scala": "scala", "dart": "dart", "make": "makefile"}
+_HTML_TAG = re.compile(r"</?[a-zA-Z][\w-]*(\s[^<>]*)?/?>")
 _CPP_ONLY = re.compile(r"\bstd::|#include\s*<\w+>(?!\.h)|\busing\s+namespace\b|\b(cout|cin|cerr)\b|\bnullptr\b|\btemplate\s*<", re.M)
 
 
@@ -70,6 +71,10 @@ def detect_language(code: str) -> str:
     m = _SHEBANG.match(text)
     if m and m.group(1).rstrip("0123456789.") in _SHEBANG_LANG:  # the author telling us the language
         return _SHEBANG_LANG[m.group(1).rstrip("0123456789.")]
+    # Starts with a tag and is mostly markup: HTML, whatever its CSS (`100%` looks like batch) or prose
+    # ("from your" looks like SQL) suggests. Not <?php / <?xml.
+    if text[:1] == "<" and text[1:2] not in "?" and len(_HTML_TAG.findall(text[:20000])) >= max(5, text[:20000].count("\n") // 4):
+        return "html"
     scores = {lang: 0.0 for lang in _COMPILED}
     for lang, rules in _COMPILED.items():
         for rx, w in rules:

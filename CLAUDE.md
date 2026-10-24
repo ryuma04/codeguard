@@ -97,6 +97,11 @@ Before you call a change done, re-run: regressions, holdout, `data/external/beni
 | Vulnerable-not-malicious code (1,721) | 2.0% blocked, mostly code carrying literal `rm -rf /` / `DROP TABLE` payloads |
 | Carrier test | 99–100% of plain-form detections survive YAML/JSON/notebook/Dockerfile wrapping |
 | Latency | in-process p50 ≈ 4 ms on real functions, sub-ms on one-liners; HTTP p50 ≈ 5.5 ms, ~120 checks/s |
+| Team holdout, 90 (`~/Downloads/codeguard_holdout.jsonl`; errors were inspected, so optimistic) | acc 0.97: 0 FP, 3 FN (all policy cases) |
+| Team prompt-injection holdout, 30 (**sealed**: never inspect its errors) | 9 TP / 3 FP / 6 FN (was 7 / 4 / 8) |
+| BrowseSafe HTML sample, 400 (seed 42) | recall 0.386, FPR 0.015 (was 0.282 / 0.126) |
+| NotInject benign prompts, 678 | 2.7% false positives |
+| Deployed on Render: Cloudflare WAF 403s ~2% of attack-like bodies (breaks schema); cloudflared tunnel had 0 | check any URL: `python eval/endpoint_check.py <url>` |
 
 ## Key decisions and why
 - **Rules + AST first, ML second.** The hackathon dev sample is tiny, and we had no labelled malicious *code* to train on,

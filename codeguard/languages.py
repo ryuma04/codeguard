@@ -3,8 +3,9 @@
 Support tiers (stated in `reason` for light/unsupported, and as `language_support` in debug output):
   deep         a structural analyser: Python (ast), SQL (statement analysis), YAML and Markdown
                (structure + embedded code re-routed through the cascade)
-  carrier      formats that only carry code (JSON, Dockerfile, Makefile): the code inside is
-               extracted and analysed in its own language
+  carrier      formats that only carry code (JSON, Dockerfile, Makefile, HTML): the code inside is
+               extracted and analysed in its own language (HTML: <script> blocks; its text, comments and
+               visually hidden elements are read by the prompt-injection layer)
   light        no structural analyser, but the shared rule layer (rules.py) was written with these
                languages' idioms in it (child_process, PHP eval/base64_decode, PowerShell -enc, shell pipes)
   unsupported  everything else, including languages the router can name (Go, OCaml, Java, ...) and text it
@@ -16,7 +17,7 @@ labelled snippets (eval/language_eval.py); keep new signals distinctive, not gen
 """
 
 DEEP = {"python", "sql", "yaml", "markdown"}
-CARRIER = {"json", "dockerfile", "makefile"}
+CARRIER = {"json", "dockerfile", "makefile", "html"}
 LIGHT = {"javascript", "typescript", "bash", "php", "powershell"}
 
 DISPLAY = {"cpp": "C++", "csharp": "C#", "fsharp": "F#", "javascript": "JavaScript", "typescript": "TypeScript",
@@ -160,6 +161,13 @@ SIGNALS = {
         (r"^\s*(export\s+)?type\s+\w+(<[^>]*>)?\s*=", 4), (r"\):\s*(string|number|boolean|void|any|unknown|never|Promise<)", 5),
         (r"\b(private|public|readonly)\s+\w+\s*:", 3), (r"\bas\s+(string|number|any|unknown|const)\b", 3),
     ],
+    "html": [
+        # Line-start tags only: programs that build HTML in strings ("<html><body>...") are not HTML documents.
+        (r"^\s*<!DOCTYPE\s+html", 10), (r"^\s*<(html|head|body)\b[^>]*>", 5),
+        (r"^\s*<(div|span|p|a|ul|li|table|section|article|header|footer|nav|img|form|input|button|meta|link|script|style|h[1-6])\b[^>]*>", 1),
+        (r"</(div|span|p|a|li|table|section|article|body|html|h[1-6])>", 1),
+        (r"\bstyle\s*=\s*[\"'][^\"']*(display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0|opacity\s*:\s*0)", 4),
+    ],
     # ---- named only (no tier of their own) ----
     "julia": [(r"^\s*using\s+[A-Z]\w+", 3), (r"^\s*function\s+\w+\(.*\)\s*$", 3), (r"\bprintln\(", 1), (r"\bend\s*$", 1), (r"::\s*(Int|Float64|String|Vector)\b", 4), (r"\brun\(`", 6)],
     "erlang": [(r"^-module\(", 8), (r"^-export\(", 8), (r"\bio:format\(", 6), (r"\bos:cmd\(", 6)],
@@ -174,4 +182,4 @@ SIGNALS = {
     "prolog": [(r"^\w+\([^)]*\)\s*:-", 8)],
     "pascal": [(r"^\s*program\s+\w+\s*;", 8), (r"^\s*begin\s*$", 2), (r"\bwriteln\(", 5), (r"^\s*end\.\s*$", 6)],
 }
-CASE_INSENSITIVE = {"fortran", "batch", "vbscript", "cobol", "pascal"}
+CASE_INSENSITIVE = {"fortran", "batch", "vbscript", "cobol", "pascal", "html"}

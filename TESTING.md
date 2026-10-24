@@ -215,6 +215,50 @@ Checks:
 - Pinned by 4 new checks in `eval/regressions.py`.
 - Follow-up from manual testing: a one-line attack (`DROP DATABASE production;`) showed no graph, because only multi-step chains were drawn. Single findings are now drawn as **code (line) → effect** in both the UI and `scan --graph`.
 
+## Round 9: team held-out sets, NotInject, BrowseSafe, real npm code
+
+New test data (test only, nothing trained on it):
+- `codeguard_holdout.jsonl` (team, 90 cases: 15 each of Python/Bash/JS/SQL/YAML/Markdown, held out).
+- `prompt_injection_holdout.csv` (team, 30 texts). **Sealed**: scored before and after, mistakes never inspected.
+- `leolee99/NotInject` (MIT): 339 benign prompts full of trigger words ("ignore", "jailbreak"), as text and inside code.
+- `perplexity-ai/browsesafe-bench` (MIT), test split: HTML pages with/without a hidden injection. Scored on a fixed
+  random sample of 400 (seed 42) because 3,680 pages × ~50 KB take too long per run.
+- 12 JS files from 7 MIT npm packages (`data/external/npm_benign.jsonl`, read from the tarballs, never run).
+
+| Set | Before | After |
+|---|---|---|
+| Team holdout, 90 (fixes were made looking at its errors, so "after" is optimistic) | acc 0.72, 12 FP, 13 FN | acc 0.97, 0 FP, 3 FN |
+| Team prompt-injection holdout, 30 (sealed) | 7 TP, 4 FP, 8 FN | 9 TP, 3 FP, 6 FN |
+| BrowseSafe sample, 400 HTML pages | recall 0.282, FPR 0.126 | recall 0.386, FPR 0.015 |
+| npm JS files, 12 | 1 FP | 0 FP |
+| NotInject, 678 | 18 FP (2.7%) | 18 FP (2.7%) |
+| All earlier sets | — | unchanged (GuardDog TP 98 → 99) |
+
+What was wrong, and the general fix:
+- **Bugs**: `env |` (shell) also matched JS `process.env || {}`; SQL `DELETE ...\nWHERE` was read as "no WHERE"
+  (whitespace); joining SQL lines then exposed `COPY (...) TO 'report.csv'` (now only risky destinations flag).
+- **HTML was not a language**: BrowseSafe fragments were detected as SQL ("from your…"), batch (`100%`) or Lua, so the
+  injection layer only read their string literals. Now: `html` (a page that starts with a tag and is mostly markup),
+  a carrier for `<script>` / `on*=` JS, read as prose by the injection layer.
+- **Hidden text**: HTML comments and CSS/attribute-hidden elements raise an injection hit (+0.1).
+- **Quoted vs addressed**: an injection phrase presented as an example/fixture/quotation ("the phrase … is shown here as
+  an example", `fixture = "…"`) is capped at 0.4, using words within 150 chars of the match (a long jailbreak can say
+  "example" far away) or the nearest non-blank neighbour lines. Never for hidden text. Not the word "test": real
+  jailbreaks use it ("created as a means to test").
+- **Invisible characters**: scattered zero-width/bidi characters occurred in 24/198 benign and 30/202 injected
+  BrowseSafe pages, i.e. no signal in documents. In HTML/Markdown/YAML they now block only as a run of ≥4 or as unicode
+  tag characters; in code (and unidentified text) they still block.
+- **Detection gaps**: imperatives addressed to an AI ("AI reviewer: ignore…"), "the user's policy"; `chmod -R 777 /etc`;
+  `fs.rmSync("/")`; `import("https://…")` and JS variable flows (`p = atob(…); eval(p)`, `u = "https://…"; import(u)`);
+  CI secrets sent in a request body/URL query (a secret in an Authorization header alone is normal); `pull_request_target`
+  checking out the PR head; bulk `SELECT` of password hashes/tokens without WHERE; markdown image beacons.
+- **Benign idioms**: `DROP TABLE IF EXISTS tmp_…/staging`; `find /srv/app/backups … -delete` (only `/`, home or top-level
+  system dirs count); SQL string literals are data (`VALUES ('… DROP TABLE users …')`).
+
+Left as a **policy question** (not changed): the team sets label insecure-but-not-malicious code as block —
+`eval(input())`, `bash -c "$USER_CONTROLLED"`, dynamic SQL with untrusted text, and in `team_cases.jsonl` 70 cases of
+SQLi / weak crypto / path traversal / SSRF / disabled TLS / pickle. Our 9 categories and the earlier decision say allow.
+
 ## What is still missed, and why
 
 - **GuardDog out-of-scope rules** (12/82 caught): screenshots, clipboard, steganography, `cmd-overwrite`, and DLL hijacking via ctypes. Their "malicious" cases are often harmless commands like `os.system("ls")` in a `setup.py`, which GuardDog flags because of *where* they run. Our task judges what the code does, so these stay allowed on purpose.

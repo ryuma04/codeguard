@@ -15,14 +15,17 @@ def analyze_sql(code: str):
         stmt = m.group(0)
         line = code.count("\n", 0, m.start() + (len(stmt) - len(stmt.lstrip()))) + 1
         s = re.sub(r"--[^\n]*|/\*.*?\*/", " ", stmt, flags=re.S).strip()
-        u = s.upper()
+        u = " ".join(s.upper().split())  # one space between tokens: "...\nWHERE" must still count as a WHERE
         if re.match(r"DELETE\s+FROM\s+\S+\s*;?$", u) or (u.startswith("DELETE") and " WHERE " not in f" {u} "):
             out.append(Finding("destructive_command", T, 0.8, line, "DELETE without a WHERE clause", "sql"))
         if re.match(r"UPDATE\s+\S+\s+SET\b", u) and " WHERE " not in f" {u} ":
             out.append(Finding("destructive_command", T, 0.6, line, "UPDATE without a WHERE clause", "sql"))
         if re.search(r"\bWHERE\s+(1\s*=\s*1|TRUE|'1'\s*=\s*'1')\s*;?$", u) and u.startswith(("DELETE", "UPDATE")):
             out.append(Finding("destructive_command", T, 0.75, line, "mass DELETE/UPDATE with always-true WHERE", "sql"))
-        if re.search(r"\bINTO\s+(OUT|DUMP)FILE\b|\bCOPY\b.+\bTO\s+'", u):
+        # INTO OUTFILE is the classic web-shell / dump primitive. A COPY ... TO '<file>' is routine reporting
+        # unless it lands in a web root / temp / home dir or exports credential tables.
+        if re.search(r"\bINTO\s+(OUT|DUMP)FILE\b", u) or (re.search(r"\bCOPY\b.+\bTO\s+'", u) and re.search(
+                r"\bTO\s+'(/VAR/WWW|[^']*(HTDOCS|PUBLIC_HTML|WWWROOT)|/TMP/|/DEV/SHM|/HOME/|/ROOT/|C:\\\\INETPUB)|PG_SHADOW|PG_AUTHID|PASSWORD|SECRET|TOKEN", u)):
             out.append(Finding("data_exfiltration", T, 0.7, line, "writes query results to a file", "sql"))
         if re.search(r"\bLOAD_FILE\s*\(|\bPG_READ_(BINARY_)?FILE\s*\(|\bLOAD\s+DATA\s+(LOCAL\s+)?INFILE\b", u):
             out.append(Finding("secret_access", T, 0.65, line, "reads server files from SQL", "sql"))
@@ -32,6 +35,10 @@ def analyze_sql(code: str):
             out.append(Finding("persistence_or_privesc", T, 0.75, line, "grants database superuser rights", "sql"))
         if re.search(r"\b(SELECT|FROM)\b.*\b(PASSWORD|PASSWD|PWD_HASH|API_KEY|SECRET|CREDIT_CARD|SSN)\w*\b", u) and re.search(r"\bUNION\b|\bINTO\s+OUTFILE\b", u):
             out.append(Finding("secret_access", T, 0.6, line, "selects credential columns via UNION/outfile", "sql"))
+        # A bulk read of authentication secrets: no WHERE, so not a login lookup for one user.
+        if u.startswith("SELECT") and " WHERE " not in f" {u} " and \
+                len(re.findall(r"\b\w*(PASSWORD|PASSWD|PWD_HASH|RESET_TOKEN|API_KEY|SECRET|ACCESS_TOKEN|REFRESH_TOKEN|PRIVATE_KEY|TOTP_SECRET|MFA_SECRET)\w*\b", u.split(" FROM ")[0])) >= 2:
+            out.append(Finding("secret_access", T, 0.6, line, "bulk-selects password hashes / auth tokens", "sql"))
         if re.search(r"\bUNION\s+(ALL\s+)?SELECT\b.*\b(INFORMATION_SCHEMA|PG_SHADOW|MYSQL\.USER|SYS\.)", u):
             out.append(Finding("secret_access", T, 0.65, line, "UNION-based system catalog dump", "sql"))
         if re.search(r"\bSLEEP\s*\(\s*\d{3,}|\bBENCHMARK\s*\(\s*\d{6,}|\bPG_SLEEP\s*\(\s*\d{3,}|WITH\s+RECURSIVE\b(?!.*\bLIMIT\b)(?!.*\bWHERE\b)", u):
@@ -63,6 +70,38 @@ def extract_yaml_shell(code: str):
                 continue
             yield i + 1, val.strip("[]\"'").replace('", "', " ").replace("', '", " ")
         i += 1
+
+
+# ---------------- CI workflows (GitHub Actions / GitLab) ----------------
+_SECRET_ENV = re.compile(r"^\s*([A-Za-z_]\w*)\s*:\s*['\"]?\$\{\{\s*secrets\.(\w+)\s*\}\}", re.M)
+# Where a value LEAVES in a request: body / form / upload / URL query. A secret in an Authorization header
+# is how deploy jobs call their own APIs, so that alone is not exfiltration.
+_SEND_SLOT = r"(--data(-raw|-binary|-urlencode)?|-d|-F|--form|--upload-file|-T|--post-data|-Body)\s*[=\s]?\s*['\"]?[^'\"\s]*{v}|https?://[^\s'\"]*[?&]\w+={v}"
+
+
+def analyze_ci_yaml(code: str):
+    out = []
+    names = {m.group(1): m.group(2) for m in _SECRET_ENV.finditer(code)}
+    lines = code.splitlines()
+    for i, ln in enumerate(lines, 1):
+        if not re.search(r"\b(curl|wget|nc|ncat|Invoke-WebRequest|Invoke-RestMethod|iwr|irm|http)\b", ln):
+            continue
+        refs = [(rf"\$\{{?{re.escape(n)}\}}?\b", f"secrets.{s} (as ${n})") for n, s in names.items()]
+        refs.append((r"\$\{\{\s*secrets\.\w+\s*\}\}", "a repository secret"))
+        for rx, label in refs:
+            if re.search(_SEND_SLOT.format(v=rx), ln):
+                src = next((j for j, l in enumerate(lines, 1) if label.startswith("secrets.") and
+                            re.search(rf"secrets\.{re.escape(label.split()[0][8:])}\b", l)), i)
+                out.append(Finding("data_exfiltration", T, 0.8, i, f"sends {label} in a network request body/URL", "yaml",
+                                   [{"line": src, "role": "source", "label": f"CI secret {label}"},
+                                    {"line": i, "role": "sink", "label": "sent in a request body / URL query"}] if src != i else []))
+                break
+    if re.search(r"^\s*on\s*:.*\bpull_request_target\b|^\s*pull_request_target\s*:", code, re.M) and \
+            re.search(r"\$\{\{\s*github\.(event\.pull_request\.head\.(sha|ref)|head_ref)\s*\}\}", code):
+        line = next((j for j, l in enumerate(lines, 1) if re.search(r"github\.(event\.pull_request\.head|head_ref)", l)), 0)
+        out.append(Finding("secret_access", T, 0.75, line,
+                           "pull_request_target workflow checks out untrusted PR code (runs it with repository secrets)", "yaml"))
+    return out
 
 
 # ---------------- Markdown: fenced code + hidden HTML comments ----------------
