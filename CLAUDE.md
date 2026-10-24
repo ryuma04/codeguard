@@ -29,7 +29,13 @@ A real-time guard that takes `{"code": "..."}` and returns allow or block **befo
 ```
 codeguard/            Python engine, stdlib only at runtime
   engine.py           cascade + scoring + response; analyze(), warmup(), LAYERS toggles
-  router.py           language detection (python/bash/js/sql/yaml/markdown/php/powershell/json/dockerfile/makefile)
+  router.py           language detection (python/bash/js/sql/yaml/markdown/php/powershell/json/dockerfile/makefile
+                      + ~30 more named via languages.py; a shebang line decides outright). Accuracy: eval/language_eval.py
+                      (CyberNative, 11 languages: 0.990 on the held-out half)
+  languages.py        detection signals for the extra languages + support tier per language (deep/carrier/light/
+                      unsupported). Light/unsupported verdicts say so at the start of `reason`. Today only the generic
+                      rules run for Go, OCaml, Java, etc.: per-language sink/source rules are open work (humans write them;
+                      a safety filter stopped Claude generating them). ml.featurize maps new labels back to its 9 languages.
   rules.py            ~80 line rules; THREAT vs CAPABILITY (GuardDog idea: capabilities alone never block)
   deobfuscate.py      static base64/hex/chr/rot13 decode, 3 layers, re-scan
   carriers.py         embedded-code extraction (YAML any key, JSON/notebook/package.json, Dockerfile, Makefile, -c, heredoc)
@@ -45,7 +51,12 @@ codeguard/            Python engine, stdlib only at runtime
   data/*.txt          package lists (top-15k PyPI; DataDog malicious/compromised names). Shipped, needed at runtime.
 models/               injection.json (~1.3 MB, 40k features), stacker.json (~1 KB). Shipped, needed at runtime.
 cli/                  Go CLI: scan / exec / bench / health (stdlib only; build: cd cli && go build -o codeguard.exe .)
+                      `scan --graph` prints the evidence chain; `--pretty` includes it in the card (cli/card.go printChains)
 ui/                   Next.js 16 + React 19 web UI, plain JSX/CSS styled per design.md; /api/analyze proxies to the engine
+                      app/evidence-graph.jsx draws the "How it gets there" evidence chains
+Evidence chains:      Finding.chain (findings.py) is filled by the AST layer (source -> sink via a variable, using
+                      PythonAnalyzer.origin; encoded -> decoded -> exec) and by the engine (deobfuscated blobs, carrier
+                      fragments, secret+network combo). engine._evidence turns them into `evidence` (debug output only).
 plugin/               Claude Code plugin: PreToolUse hook (hooks/codeguard_hook.py, stdlib) gates Bash/PowerShell/Write/Edit via
                       POST /analyze; fails closed; test: python plugin/test_hook.py. Marketplace: .claude-plugin/marketplace.json.
                       .codeguardignore lists this repo's own attack-string files so writes to them aren't blocked. It is read

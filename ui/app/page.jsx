@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EXAMPLES } from "./examples";
+import EvidenceGraph, { hasEvidence } from "./evidence-graph";
 
 const CATEGORY_LABEL = {
   secret_access: "Secret access",
@@ -65,6 +66,7 @@ export default function Home() {
       });
       const data = await res.json();
       setResult(data);
+      setActiveLine(null);
       setHistory((h) => [{ code, data, at: new Date().toLocaleTimeString() }, ...h].slice(0, 10));
       if (fixing) {
         setOutcome(data.verdict === "allow" ? "fixed" : "still");
@@ -87,6 +89,19 @@ export default function Home() {
     ta.setSelectionRange(offset, offset + (code.split("\n")[first - 1] || "").length);
     ta.scrollTop = Math.max(0, (first - 3) * 22);
     ta.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
+  // Evidence graph: clicking a node selects that line in the editor.
+  const [activeLine, setActiveLine] = useState(null);
+  const selectLine = (n) => {
+    setActiveLine(n);
+    const ta = editorRef.current;
+    if (!ta) return;
+    const all = code.split("\n");
+    const offset = all.slice(0, n - 1).reduce((acc, l) => acc + l.length + 1, 0);
+    ta.focus();
+    ta.setSelectionRange(offset, offset + (all[n - 1] || "").length);
+    ta.scrollTop = Math.max(0, (n - 3) * 22);
   };
 
   // Option "Block": discard the code and record the decision.
@@ -231,6 +246,15 @@ export default function Home() {
                   {result.rule_risk != null && result.ml_prob != null && <> · rules {result.rule_risk.toFixed(2)} · model {result.ml_prob.toFixed(2)}</>}
                 </div>
               </div>
+            </section>
+          )}
+
+          {result && blocked && hasEvidence(result.evidence) && (
+            <section className="card">
+              <p className="eyebrow">Evidence</p>
+              <h2>How it gets there</h2>
+              <p className="muted evhint">Each path ends at what the code would do. Click a step to jump to its line.</p>
+              <EvidenceGraph evidence={result.evidence} labels={CATEGORY_LABEL} activeLine={activeLine} onPickLine={selectLine} />
             </section>
           )}
 

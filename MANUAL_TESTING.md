@@ -63,6 +63,7 @@ Expect `UP: http://127.0.0.1:8000`.
 echo 'rm -rf --no-preserve-root /' | ./cli/codeguard.exe scan --pretty -
 echo 'print(sum(range(10)))' | ./cli/codeguard.exe scan -
 ./cli/codeguard.exe scan --pretty demo/gate/unsafe_snippet.py
+./cli/codeguard.exe scan --graph demo/gate/unsafe_snippet.py
 echo $?
 ```
 The last line should print `2`.
@@ -102,6 +103,9 @@ Open http://localhost:3000.
 | Chip "destructive: rm -rf /" → Analyze | coral card, BLOCK, sticker "Blocked!", risk ≈ 0.99, line 1 red in the gutter |
 | Chip "Python: clean up a temp dir" → Analyze | mint card, ALLOW; "rules 0.30 · model 0.13" shows the stacker was consulted |
 | "Show schema response" | exactly `verdict, risk_score, categories, code_language, reason, vulnerable_lines` |
+| Paste a 2-line exfiltration (read `~/.aws/credentials` into `data`, then `requests.post(..., data=data)`) → Analyze | a "How it gets there" card: yellow **Source** (line 2) → "via data" → red **Sink** (line 3). Clicking a step selects that line in the editor |
+| Chip "destructive: SQL drop" → Analyze | the same card for a one-line attack: **Code** (line 1, `DROP DATABASE production;`) → **Effect** (drops or truncates database objects) |
+| No "How it gets there" card at all? | the engine is running old code: restart it (`python -m codeguard.api --port 8000`) |
 | Paste your own code, press Ctrl+Enter | verdict in a few ms |
 | Click a row under "Recent checks" | reloads that code and its result |
 | Stop the engine (Ctrl+C in terminal 1), Analyze | badge "engine down", verdict BLOCK, notice "failed closed" |

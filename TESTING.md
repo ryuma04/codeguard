@@ -198,6 +198,23 @@ D is the only candidate with no added false positives on real code. It loses 4 r
 
 After switching the live model to D: regressions all pass, library code 3/659, GuardDog 98/2, vulnerable code 35, team benign 0, holdout 1.00/1.00, carrier 99–100%, demo PASS, latency unchanged (p50 4.2 ms).
 
+## Round 8: evidence chains (explanation only)
+
+Blocks now carry *how* the code reaches the flagged behaviour (`evidence`, debug output only), drawn in the web UI ("How it gets there") and in the CLI (`codeguard scan --graph`, and inside `--pretty`).
+
+| Attack | Chain |
+|---|---|
+| secret read on line 2, sent on line 3 | source (reads sensitive file ~/.aws/credentials, L2) → via `data` → sink (sent over the network, L3) |
+| demo unsafe snippet | encoded (b64decode, L4) → decoded ("import os; open(…" ⇒ recursively deletes root/home) → via `payload` → sink (exec, L5) |
+| Python hidden under a custom YAML key | carrier (embedded python block, L3) → source (reads secret env var, L5) → via `cfg` → sink (network, L6) |
+
+Checks:
+- Verdicts are identical on every suite: holdout, library code, GuardDog, vulnerable code, team cases, carrier test, both demos, 46 hook tests.
+- `vulnerable_lines` now includes a chain's source line (e.g. `[2, 3]` instead of `[3]`).
+- Latency is unchanged: the commits before this round measure the same p50 (5.3–5.4 ms on this machine at the time).
+- Pinned by 4 new checks in `eval/regressions.py`.
+- Follow-up from manual testing: a one-line attack (`DROP DATABASE production;`) showed no graph, because only multi-step chains were drawn. Single findings are now drawn as **code (line) → effect** in both the UI and `scan --graph`.
+
 ## What is still missed, and why
 
 - **GuardDog out-of-scope rules** (12/82 caught): screenshots, clipboard, steganography, `cmd-overwrite`, and DLL hijacking via ctypes. Their "malicious" cases are often harmless commands like `os.system("ls")` in a `setup.py`, which GuardDog flags because of *where* they run. Our task judges what the code does, so these stay allowed on purpose.

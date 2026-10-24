@@ -2,6 +2,8 @@
 import ast
 import re
 
+from .languages import SIGNALS as _LANG_SIGNALS, CASE_INSENSITIVE as _LANG_CI
+
 _SIGNALS = {
     "python": [
         (r"^\s*(import|from)\s+[\w\.]+", 3), (r"^\s*def\s+\w+\(.*\)\s*:", 3),
@@ -46,12 +48,28 @@ _COMPILED = {lang: [(re.compile(p, re.I | re.M), w) for p, w in sigs] for lang, 
 _CASE_SENSITIVE = {"python", "javascript", "dockerfile"}
 _YAML_TOP = re.compile(r"""^(?:[\w.\-]+|"[^"]*"|'[^']*')\s*:(\s|$)|^-\s""")
 _COMPILED.update({lang: [(re.compile(p, re.M), w) for p, w in _SIGNALS[lang]] for lang in _CASE_SENSITIVE})
+# Languages beyond the original eleven (languages.py): case-sensitive unless listed otherwise.
+_COMPILED.update({lang: [(re.compile(p, re.M | (re.I if lang in _LANG_CI else 0)), w) for p, w in sigs]
+                  for lang, sigs in _LANG_SIGNALS.items() if sigs})
+# TypeScript only refines a JavaScript verdict; its signals never compete on their own.
+_TS = _COMPILED.pop("typescript")
+_SHEBANG = re.compile(r"#!\s*\S*/(?:env\s+(?:-\S+\s+)*)?([\w.\-]+)")
+_SHEBANG_LANG = {"sh": "bash", "bash": "bash", "zsh": "bash", "dash": "bash", "ksh": "bash", "ash": "bash",
+                 "python": "python", "pypy": "python", "node": "javascript", "nodejs": "javascript", "deno": "javascript",
+                 "bun": "javascript", "ts-node": "typescript", "perl": "perl", "ruby": "ruby", "php": "php", "lua": "lua",
+                 "pwsh": "powershell", "powershell": "powershell", "Rscript": "r", "elixir": "elixir", "julia": "julia",
+                 "ocaml": "ocaml", "runhaskell": "haskell", "swift": "swift", "groovy": "groovy", "kotlin": "kotlin",
+                 "scala": "scala", "dart": "dart", "make": "makefile"}
+_CPP_ONLY = re.compile(r"\bstd::|#include\s*<\w+>(?!\.h)|\busing\s+namespace\b|\b(cout|cin|cerr)\b|\bnullptr\b|\btemplate\s*<", re.M)
 
 
 def detect_language(code: str) -> str:
     text = code.strip()
     if not text:
         return "unknown"
+    m = _SHEBANG.match(text)
+    if m and m.group(1).rstrip("0123456789.") in _SHEBANG_LANG:  # the author telling us the language
+        return _SHEBANG_LANG[m.group(1).rstrip("0123456789.")]
     scores = {lang: 0.0 for lang in _COMPILED}
     for lang, rules in _COMPILED.items():
         for rx, w in rules:
@@ -84,4 +102,10 @@ def detect_language(code: str) -> str:
         except (ValueError, RecursionError):
             scores["json"] *= 0.3
     best = max(scores, key=scores.get)
-    return best if scores[best] > 1 else "unknown"
+    if scores[best] <= 1:
+        return "unknown"
+    if best == "javascript" and sum(w * min(len(rx.findall(text)), 5) for rx, w in _TS) >= 4:
+        return "typescript"
+    if best == "c" and _CPP_ONLY.search(text):
+        return "cpp"
+    return best

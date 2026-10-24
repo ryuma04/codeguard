@@ -53,6 +53,8 @@ def featurize(code, language, findings, decoded_layers=0):
     f["long_token"] = float(bool(re.search(r"[A-Za-z0-9+/=]{60,}", code)))
     f["log_len"] = math.log1p(len(code)) / 10
     f["non_alnum_ratio"] = sum(not ch.isalnum() and not ch.isspace() for ch in code) / max(1, len(code))
+    # The model was trained on these nine; newer router labels map to what they used to be detected as.
+    language = language if language in LANGS else "javascript" if language == "typescript" else "unknown"
     for lang in LANGS:
         f[f"lang_{lang}"] = float(language == lang)
     return f
@@ -83,7 +85,7 @@ def predict(features):
     if m is None:
         return None
     z = m["intercept"] + sum(m["coef"].get(k, 0.0) * v for k, v in features.items())
-    return 1 / (1 + math.exp(-z))
+    return 1 / (1 + math.exp(-max(-60.0, min(60.0, z))))  # clamp: exp() overflows past ~709
 
 
 def adjust(risk, features):

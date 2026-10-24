@@ -28,6 +28,10 @@ class Finding:
     line: int          # 1-based line number (0 = whole snippet)
     reason: str
     source: str = "rule"   # rule | ast | sql | yaml | markdown | injection | deobf | combo | typosquat
+    # Evidence chain for explanations (UI graph, `codeguard scan --graph`): the path that makes this a threat,
+    # e.g. [source: reads ~/.aws/credentials (line 2)] -> [sink: sent over the network (line 3)].
+    # Each step: {"line": int, "role": source|encoded|decoded|carrier|step|sink, "label": str, "via": str?}
+    chain: list = field(default_factory=list)
 
     def key(self):
         return (self.category, self.reason, self.line)

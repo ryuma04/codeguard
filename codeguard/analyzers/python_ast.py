@@ -82,11 +82,49 @@ class PythonAnalyzer(ast.NodeVisitor):
         self.loop_stack = []
         self.fetched = set()    # variables holding data downloaded at runtime
         self.flags = set()      # snippet-level facts: download / write_bin / run
+        self.origin = {}        # variable -> evidence step where its secret/decoded/downloaded value came from
 
     # ---------------- helpers ----------------
-    def add(self, cat, kind, w, node, reason):
+    def add(self, cat, kind, w, node, reason, chain=None):
         line = getattr(node, "lineno", 0) + self.offset if node is not None else 0
-        self.findings.append(Finding(cat, kind, w, line, reason, "ast"))
+        self.findings.append(Finding(cat, kind, w, line, reason, "ast", list(chain or [])))
+
+    def _step(self, node, role, label, via=None):
+        s = {"line": getattr(node, "lineno", 0) + self.offset, "role": role, "label": label}
+        if via:
+            s["via"] = via
+        return s
+
+    def _origin_of(self, expr):
+        """(origin step, variable) for the first variable in expr whose value we traced back, else (None, None)."""
+        for n in ast.walk(expr):
+            if isinstance(n, ast.Name) and n.id in self.origin:
+                return self.origin[n.id], n.id
+        return None, None
+
+    def _flow(self, expr, why, sink_node, sink_label):
+        """source -> sink chain for secret data reaching a sink (network call, print)."""
+        src, var = self._origin_of(expr)
+        steps = [dict(src)] if src else [self._step(expr, "source", f"reads {why}")]
+        steps.append(self._step(sink_node, "sink", sink_label, via=var))
+        return steps
+
+    def _exec_chain(self, node, arg, payload, short, dec, hits):
+        """encoded -> decoded -> exec chain for dynamic execution of hidden code."""
+        steps = []
+        src, var = self._origin_of(arg) if arg is not None else (None, None)
+        if src:
+            steps.append(dict(src))
+        elif dec:
+            steps.append(self._step(arg, "encoded", f"{dec}() decodes hidden data"))
+        if isinstance(payload, str):
+            preview = " ".join(payload.split())
+            preview = preview[:44] + ("…" if len(preview) > 44 else "")  # short, so "⇒ what it does" stays visible
+            found = list(dict.fromkeys(h.reason for h in hits))[:2]
+            steps.append({"line": steps[0]["line"] if steps else node.lineno + self.offset, "role": "decoded",
+                          "label": f"decodes to: {preview}" + (f"  ⇒ {'; '.join(found)}" if found else "")})
+        steps.append(self._step(node, "sink", f"{short}() executes it", via=var))
+        return steps if len(steps) > 1 else []
 
     def resolve(self, node):
         q = _qual(node)
@@ -338,6 +376,11 @@ class PythonAnalyzer(ast.NodeVisitor):
             if target:
                 imported = target
         downloaded = self._is_download(node.value)
+        dec = self._has_decoder(node.value) if isinstance(val, (str, bytes)) else None
+        inherited, _ = self._origin_of(node.value)
+        origin = (self._step(node, "source", f"reads {src}") if src and not src.startswith("non-secret") else
+                  self._step(node, "encoded", f"{dec}() decodes a hidden payload") if dec else
+                  self._step(node, "source", "downloaded at runtime") if downloaded else inherited)
         for t in node.targets:
             for n in ast.walk(t):
                 if isinstance(n, ast.Name):
@@ -349,6 +392,8 @@ class PythonAnalyzer(ast.NodeVisitor):
                         self.tainted[n.id] = src
                     if imported:
                         self.aliases[n.id] = imported
+                    if origin:
+                        self.origin[n.id] = origin
         self._check_folded(node.value, val)
         self.generic_visit(node)
 
@@ -391,16 +436,22 @@ class PythonAnalyzer(ast.NodeVisitor):
             literal = isinstance(arg, ast.Constant)
             dec = self._has_decoder(arg) if arg is not None else None
             seg = ast.get_source_segment(self.src, arg) or "" if arg is not None and self.src else ""
+            # What the hidden code does, found by re-analysing it; computed first so the chain can say so.
+            hits = self.rescan(payload, node.lineno + self.offset - 1, "payload") if isinstance(payload, str) and self.rescan else []
+            chain = self._exec_chain(node, arg, payload, short, dec, hits)
+            for h in hits:
+                if not h.chain:
+                    h.chain = [dict(s) for s in chain]
             if arg is not None and (self._is_download(arg) or any(isinstance(n, ast.Name) and n.id in self.fetched for n in ast.walk(arg))):
-                self.add("obfuscated_execution", T, 0.85, node, f"{short}() runs code downloaded at runtime")
-                self.add("dependency_risk", T, 0.7, node, "downloads and executes remote code")
+                self.add("obfuscated_execution", T, 0.85, node, f"{short}() runs code downloaded at runtime", chain)
+                self.add("dependency_risk", T, 0.7, node, "downloads and executes remote code", chain)
             elif dec and payload is _UNSET:
-                self.add("obfuscated_execution", T, 0.85, node, f"{short}() runs data passed through {dec}()")
+                self.add("obfuscated_execution", T, 0.85, node, f"{short}() runs data passed through {dec}()", chain)
             if literal and isinstance(payload, str) and (re.fullmatch(r"[A-Za-z0-9+/=\s]{40,}", payload)
                                                          or len(re.findall(r"\\[0-7]{3}|\\x[0-9a-fA-F]{2}", seg)) >= 4):
                 self.add("obfuscated_execution", T, 0.8, node, f"{short}() of an encoded/escaped literal")
             if isinstance(payload, str) and not literal:
-                self.add("obfuscated_execution", T, 0.9, node, f"{short}() runs a decoded/assembled payload")
+                self.add("obfuscated_execution", T, 0.9, node, f"{short}() runs a decoded/assembled payload", chain)
             elif isinstance(payload, str) and literal:
                 self.add("obfuscated_execution", C, 0.35, node, f"{short}() of a literal string")
             elif arg is not None:
@@ -412,8 +463,7 @@ class PythonAnalyzer(ast.NodeVisitor):
                     self.add("obfuscated_execution", T, 0.85, node, f"{short}() runs code fetched/received at runtime")
                 else:
                     self.add("obfuscated_execution", T, 0.4, node, f"{short}() of a value only known at runtime")
-            if isinstance(payload, str) and self.rescan:
-                self.findings.extend(self.rescan(payload, node.lineno + self.offset - 1, "payload"))
+            self.findings.extend(hits)
 
         # --- shell commands: fold the command and scan it as bash ---
         if fn in SHELL_SINKS:
@@ -477,7 +527,8 @@ class PythonAnalyzer(ast.NodeVisitor):
             for e in list(node.args) + [k.value for k in node.keywords]:
                 why = self._is_secret_source(e)
                 if why and why.startswith(("environment", "secret", "sensitive")) and self._mentions_secret(node):
-                    self.add("secret_access", T, 0.7, node, f"prints/writes {why}")
+                    self.add("secret_access", T, 0.7, node, f"prints/writes {why}",
+                             self._flow(e, why, node, "printed / written out"))
                     break
 
         # --- destructive filesystem calls ---
@@ -509,9 +560,10 @@ class PythonAnalyzer(ast.NodeVisitor):
                 why = self._is_secret_source(e)
                 if why and not why.startswith("non-secret"):  # sending APP_MODE out is config, not exfiltration
                     w = 0.7 if why == "file contents" else 0.65 if why.startswith("host") else 0.9
-                    self.add("data_exfiltration", T, w, node, f"sends {why} over the network")
+                    flow = self._flow(e, why, node, "sent over the network")
+                    self.add("data_exfiltration", T, w, node, f"sends {why} over the network", flow)
                     if why.startswith(("environment", "secret", "sensitive")):
-                        self.add("secret_access", T, 0.7, node, f"reads {why}")
+                        self.add("secret_access", T, 0.7, node, f"reads {why}", flow)
                     break
 
         # --- process explosion inside a loop ---
@@ -549,6 +601,8 @@ class PythonAnalyzer(ast.NodeVisitor):
                 why = self._is_secret_source(item.context_expr)
                 if why:
                     self.tainted[item.optional_vars.id] = why
+                    if not why.startswith("non-secret"):
+                        self.origin[item.optional_vars.id] = self._step(node, "source", f"reads {why}")
         self.generic_visit(node)
 
     visit_AsyncWith = visit_With
@@ -562,6 +616,7 @@ class PythonAnalyzer(ast.NodeVisitor):
             for n in ast.walk(node.target):
                 if isinstance(n, ast.Name):
                     self.tainted[n.id] = "environment"
+                    self.origin[n.id] = self._step(node, "source", "reads secret-looking environment variables")
         self.loop_stack.append(node)
         self.generic_visit(node)
         self.loop_stack.pop()

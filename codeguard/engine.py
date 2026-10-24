@@ -7,6 +7,7 @@ import time
 
 from .findings import CATEGORIES, Context, Finding, THREAT, CAPABILITY
 from .router import detect_language
+from . import languages
 from .rules import scan_text
 from .deobfuscate import unwrap
 from .carriers import extract_embedded
@@ -53,6 +54,7 @@ def _analyze_chunk(text: str, language: str, line_offset: int, ctx: Context, dep
             for f in local.findings:
                 f.line = line + 1 if line >= 0 else 0  # report the line of the call site
                 f.source = f"ast:{kind}"
+                f.chain = []  # steps were numbered inside the decoded text; the caller attaches the outer chain
             return [f for f in local.findings if f.kind == THREAT]
         res = analyze_python(text, line_offset, depth, rescan)
         if res is not None:
@@ -82,9 +84,13 @@ def _analyze_chunk(text: str, language: str, line_offset: int, ctx: Context, dep
                 sub_lang = "bash"
             sub = Context(body)
             _analyze_chunk(body, sub_lang, line - 1 + line_offset, sub, depth + 1, skip_rules=verbatim)
+            carrier = {"line": line + line_offset, "role": "carrier",
+                       "label": f"{sub_lang} code embedded in {language}" if sub_lang != language else f"embedded {sub_lang} block"}
             for f in sub.findings:
                 if f.source == "rule":
                     f.source = "carrier"
+                if f.kind == THREAT:
+                    f.chain = [carrier] + (f.chain or [{"line": f.line, "role": "sink", "label": f.reason}])
             ctx.findings.extend(sub.findings)
 
     # Deobfuscation: decode blobs statically and analyse the plaintext.
@@ -96,13 +102,21 @@ def _analyze_chunk(text: str, language: str, line_offset: int, ctx: Context, dep
             threats = [f for f in sub.findings if f.kind == THREAT]
             if threats:
                 line = _line_of(text, plain, kind) + line_offset
+                preview = " ".join(plain.split())
+                preview = preview[:60] + ("…" if len(preview) > 60 else "")
+                found = list(dict.fromkeys(f.reason for f in threats))[:2]
+                chain = [{"line": line, "role": "encoded", "label": f"{kind} blob" + (f" ({layer} layers)" if layer > 1 else "")},
+                         {"line": line, "role": "decoded", "label": f"decodes to: {preview}"},
+                         {"line": line, "role": "sink", "label": "; ".join(found)}]
                 for f in threats:
                     f.line = line
                     f.source = f"deobf:{kind}"
                     f.reason = f"{f.reason} (hidden in {kind})"
+                    f.chain = [dict(s) for s in chain]
                 ctx.findings.extend(threats)
                 ctx.add(Finding("obfuscated_execution", THREAT, 0.7 if layer == 1 else 0.85, line,
-                                f"malicious code hidden behind {kind} encoding ({layer} layer{'s' if layer > 1 else ''})", "deobf"))
+                                f"malicious code hidden behind {kind} encoding ({layer} layer{'s' if layer > 1 else ''})", "deobf",
+                                [dict(s) for s in chain]))
 
 
 def _line_of(text, plain, kind):
@@ -120,8 +134,14 @@ def _combine(ctx: Context):
     has_net = any(x.category == "data_exfiltration" and x.kind == CAPABILITY for x in f) or \
         any(x.category in ("data_exfiltration", "ssrf_network_exfil") and x.kind == THREAT for x in f)
     if "secret_access" in cats and has_net and "data_exfiltration" not in cats:
-        line = min((x.line for x in f if x.category == "secret_access" and x.kind == THREAT), default=0)
-        ctx.add(Finding("data_exfiltration", THREAT, 0.8, line, "reads secrets and makes a network call in the same snippet", "combo"))
+        secret = min((x for x in f if x.category == "secret_access" and x.kind == THREAT), key=lambda x: x.line or 10**9, default=None)
+        net = next((x for x in f if x.category in ("data_exfiltration", "ssrf_network_exfil") and x.line), None)
+        line = secret.line if secret else 0
+        chain = [{"line": secret.line, "role": "source", "label": secret.reason}] if secret and secret.line else []
+        if net:
+            chain.append({"line": net.line, "role": "sink", "label": net.reason})
+        ctx.add(Finding("data_exfiltration", THREAT, 0.8, line, "reads secrets and makes a network call in the same snippet", "combo",
+                        chain if len(chain) > 1 else []))
     if any(x.category == "obfuscated_execution" and x.kind == THREAT for x in f) and has_net:
         ctx.add(Finding("obfuscated_execution", THREAT, 0.6, 0, "obfuscated code combined with network access", "combo"))
     # Python gets precise taint tracking in the AST layer; this coarse combo is for JS / PowerShell.
@@ -193,6 +213,49 @@ def warmup():
     analyze("import os\n# warm-up\nprint(os.getcwd())")
 
 
+MAX_EVIDENCE = 6
+
+
+def _evidence(code, threats):
+    """Why it was blocked, as chains of steps for the UI graph and `codeguard scan --graph`.
+
+    Multi-step chains first (source -> sink, encoded -> decoded -> exec, carrier -> embedded code),
+    then single findings. Identical chains are merged; each step carries its line of code.
+    Debug output only: the fixed response schema is unchanged.
+    """
+    src = code.splitlines()
+
+    def text(n):
+        return src[n - 1].strip()[:160] if 0 < n <= len(src) else ""
+
+    out, seen, covered = [], set(), []
+    for x in sorted(threats, key=lambda x: (-(len(x.chain) > 1), -len(x.chain), -x.weight)):
+        steps = x.chain if len(x.chain) > 1 else [{"line": x.line, "role": "finding", "label": x.reason}]
+        key = tuple((s.get("line"), s.get("role"), s.get("label")) for s in steps)
+        lines = {s.get("line") for s in steps}
+        # Skip repeats, and anything whose lines a longer chain already explains (it would only restate it).
+        if key in seen or any(lines <= c and lines != c or (lines == c and len(steps) == 1) for c in covered):
+            continue
+        seen.add(key)
+        covered.append(lines)
+        out.append({"category": x.category, "weight": x.weight, "reason": x.reason,
+                    "steps": [dict(s, code=text(s.get("line", 0))) for s in steps]})
+        if len(out) >= MAX_EVIDENCE:
+            break
+    return out
+
+
+def _support_note(language, support):
+    """Say plainly when a verdict rests on less than full analysis (see languages.py for the tiers)."""
+    if support == "unsupported":
+        if language == "unknown":
+            return "language could not be identified: language support not present, only generic rules were applied"
+        return f"language support not present for {languages.display(language)}: only generic rules were applied"
+    if support == "light":
+        return f"light (rule-based) analysis for {languages.display(language)}"
+    return ""
+
+
 def analyze(code, threshold: float = BLOCK_THRESHOLD) -> dict:
     t0 = time.perf_counter()
     if isinstance(code, str) and code.startswith("﻿"):  # a file-encoding BOM, not hidden text
@@ -215,11 +278,18 @@ def analyze(code, threshold: float = BLOCK_THRESHOLD) -> dict:
     if verdict == "block":
         uniq = list({(x.category, x.reason.replace(" (hidden in base64)", "")): x for x in threats}.values())[:4]
         reason = "; ".join(f"{x.category}: {x.reason}" + (f" (line {x.line})" if x.line else "") for x in uniq)
-        lines = sorted({x.line for x in threats if x.line > 0})
+        # A chain's source line is as vulnerable as its sink (the line that reads the secret, not only the one that sends it).
+        lines = sorted({x.line for x in threats if x.line > 0} | {s["line"] for x in threats for s in x.chain if s.get("line", 0) > 0})
+        evidence = _evidence(ctx.code, threats)
     else:
         caps = sorted({x.reason for x in ctx.findings if x.kind == CAPABILITY})
         reason = "no high-risk pattern found" + (f"; capabilities seen: {', '.join(caps[:4])}" if caps else "")
         lines = []
+        evidence = []
+    support = languages.support(ctx.language)
+    note = _support_note(ctx.language, support)
+    if note:
+        reason = f"{note}; {reason}"
 
     return {
         "verdict": verdict,
@@ -229,7 +299,9 @@ def analyze(code, threshold: float = BLOCK_THRESHOLD) -> dict:
         "reason": reason,
         "vulnerable_lines": lines,
         "category_scores": per_cat,
+        "language_support": support,
         "decoded_layers": ctx.decoded_layers,
+        "evidence": evidence,
         "rule_risk": round(float(rule_risk), 3),
         "ml_prob": ml_prob,
         "latency_ms": round((time.perf_counter() - t0) * 1000, 2),
