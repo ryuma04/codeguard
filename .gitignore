@@ -8,3 +8,4 @@ cli/codeguard.exe
 cli/codeguard
 marker_*.txt
 playground/
+.codeguard/

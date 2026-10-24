@@ -13,6 +13,24 @@ Claude ◄── "CodeGuard BLOCKED … why … flagged lines … how to fix" (t
 Claude ── rewrites without the flagged behaviour ──► hook ──► allow ──► runs
 ```
 
+## When something is blocked: three options
+
+By default (`CODEGUARD_ON_BLOCK=ask`), a block does not just bounce back to Claude. Claude asks **you**
+(with its multiple-choice question) what to do:
+
+| Option | What happens | Verified again? |
+|---|---|---|
+| **Ask Claude to fix it** | Claude gets the categories, flagged lines and a fix hint, and rewrites the code | yes: the rewrite goes through the hook |
+| **I'll fix it myself** | The question shows the blocked code with line numbers and the flagged lines marked. The code is saved to `.codeguard/quarantine/<id>.<ext>` (a script that a command ran is edited in place). Then either **type the fix in the CLI** (Claude saves your exact text) or **open it in your editor** (`--edit` opens VS Code / `$CODEGUARD_EDITOR` / Notepad, waits until you close it). It is re-checked automatically; on ALLOW, Claude carries out the original action with your version | yes: by `--recheck`, and again when the action runs |
+| **Block it** | Recorded for the session (`--decline`); the quarantined copy is deleted. Any later attempt at the same kind of code in this session is refused without asking again | n/a |
+
+- "Ask Claude to fix it" is not offered after a retry limit, an identical resubmission or an evasion attempt.
+  Only you can fix it then.
+- There is deliberately **no "run it anyway"**: fixing or blocking are the only ways forward.
+- `.codeguard/` gets its own `.gitignore` (`*`), so quarantined code is never committed. Your own files are never
+  deleted by `--decline`.
+- `CODEGUARD_ON_BLOCK=fix` skips the question (Claude fixes it directly); `CODEGUARD_ON_BLOCK=deny` is a hard stop (CI).
+
 ## What is checked
 
 | Tool call | What is scanned |
@@ -31,12 +49,13 @@ Claude ── rewrites without the flagged behaviour ──► hook ──► al
 - File writes under patterns in the project's `.codeguardignore` are not scanned. This repository lists its
   own rules and tests there, because they contain attack strings on purpose. Running code is always scanned.
 
-Also included: `/codeguard:scan <file>` checks a file without running it, and `/codeguard:status` shows
-engine health and recent decisions. A skill tells Claude how to react to a block: fix it or ask, never evade.
+Also included: `/codeguard:scan <file>` checks a file without running it, `/codeguard:recheck` verifies code
+you fixed yourself, and `/codeguard:status` shows engine health and recent decisions. A skill tells Claude how to react to a block: fix it or ask, never evade.
 
 ## Install
 
-1. Start the engine (from the repository root): `npm run engine`
+1. Start the engine: `codeguard engine` (install the `codeguard` command once with `npm link` in the repository
+   root, or run `python -m codeguard.api --port 8000` there)
 2. Load the plugin in Claude Code, either way:
    - for one session: `claude --plugin-dir ./plugin`
    - install it: `/plugin marketplace add ./` (or `/plugin marketplace add ryuma04/cognition`), then
@@ -51,11 +70,15 @@ Requires Python 3.9+ on PATH (the hook is standard library only). Settings are e
 | `CODEGUARD_FAIL` | `deny` | `ask` = prompt the user instead of denying when the engine is unreachable |
 | `CODEGUARD_WRITES` | `deny` | `ask` or `off` for file writes/edits (execution is always enforced) |
 | `CODEGUARD_MAX_BLOCKS` | `3` | blocks per session before Claude is told to stop retrying |
+| `CODEGUARD_ON_BLOCK` | `ask` | `ask` = the three options above; `fix` = Claude fixes without asking; `deny` = hard stop |
+| `CODEGUARD_EDITOR` | VS Code, else `$VISUAL`/`$EDITOR`, else Notepad (Windows) / TextEdit (macOS) | editor for "Open in my editor"; it must wait until the file is closed (e.g. `code --wait`) |
 | `CODEGUARD_SHOW_ALLOW` | `1` | `0` hides the one-line allow note |
 
 ## Live demo script (judging)
 
-Run in a terminal inside this repository, with the engine up and the plugin loaded.
+Run in a terminal inside this repository, with the engine up and the plugin loaded. On each block, Claude
+asks which of the three options you want: show all three during the demo (e.g. step 1 "Block it", step 3
+"I'll fix it myself", step 4 "Ask Claude to fix it").
 
 1. **Malicious file run:** *"Run demo/gate/unsafe_snippet.py"*. The hook scans the file and denies it
    (obfuscated_execution + destructive_command, the base64 → exec on lines 4–5). Claude explains it and does not
@@ -72,8 +95,10 @@ Run in a terminal inside this repository, with the engine up and the plugin load
    (A prompt with no safe version, e.g. "read ~/.aws/credentials", stays blocked, so Claude asks you instead.)
 4. Show `/codeguard:status`: every allow/block with its risk and category.
 
-Proof without Claude Code: `npm run plugin-test` (`python plugin/test_hook.py`) sends sample tool calls through
-the hook exactly as Claude Code does (engine must be up) and runs 14 checks, including fail-closed and the retry limit.
+Proof without Claude Code: `codeguard test plugin` (`python plugin/test_hook.py`) sends sample tool calls through
+the hook exactly as Claude Code does (engine must be up) and runs 39 checks: blocks and allows, the three options
+(quarantine, the code view, typed fixes, editing in an editor, recheck before and after a fix, decline),
+fail-closed, and the retry limit.
 
 ## How this scales to multi-agent systems
 
