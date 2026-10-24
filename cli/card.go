@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 )
 
@@ -61,85 +60,104 @@ func prettyCategory(c string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 
+func clip(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n-1]) + "…"
+	}
+	return s
+}
+
+// reasonsByCategory keeps the first (strongest) reason the engine gave for each category.
+// The engine's reason string is "category: text (line N); category: text; ...".
+func reasonsByCategory(reason string) map[string]string {
+	out := map[string]string{}
+	for _, r := range strings.Split(reason, "; ") {
+		cat, text, ok := strings.Cut(r, ": ")
+		if ok {
+			if _, seen := out[cat]; !seen {
+				out[cat] = text
+			}
+		}
+	}
+	return out
+}
+
+// printCard: the verdict in one line, one reason per blocking category, the flagged lines, and one
+// line on what CodeGuard did. Only what a reviewer needs; `scan --json` has the full response.
 func printCard(w io.Writer, p palette, v *Verdict, code, name string) {
-	color, mark := p.green, "ALLOW"
-	if v.Verdict == "block" {
-		color, mark = p.red, "BLOCK"
+	blocked := v.Verdict == "block"
+	color, mark := p.green, "✔ ALLOWED"
+	if blocked {
+		color, mark = p.red, "✖ BLOCKED"
 	}
-	rule := p.dim + strings.Repeat("─", 64) + p.reset
+	rule := p.dim + strings.Repeat("─", 88) + p.reset
 	fmt.Fprintln(w, rule)
+
+	// 1. verdict, risk, threshold
+	fmt.Fprintf(w, " %s%s%s   risk %s%.2f%s  %s%s%s %sblock at %.2f%s\n",
+		color+p.bold, mark, p.reset, p.bold, v.RiskScore, p.reset,
+		color, bar(v.RiskScore, 24, blockThreshold), p.reset, p.dim, blockThreshold, p.reset)
+
+	// 2. what was checked, how fast
+	facts := []string{}
 	if name != "" {
-		fmt.Fprintf(w, "%s%s%s\n", p.dim, name, p.reset)
+		facts = append(facts, clip(name, 40))
 	}
-	fmt.Fprintf(w, "%s%s %s %s   risk %s%.3f%s\n", color+p.bold, "▌", mark, p.reset, p.bold, v.RiskScore, p.reset)
-	fmt.Fprintf(w, "%s%s%s  %sthreshold %.2f%s\n", color, bar(v.RiskScore, 40, blockThreshold), p.reset, p.dim, blockThreshold, p.reset)
-	facts := []string{"language " + p.bold + v.CodeLanguage + p.reset}
+	facts = append(facts, v.CodeLanguage)
 	if v.LatencyMS > 0 {
-		facts = append(facts, fmt.Sprintf("engine %s%.2f ms%s", p.bold, v.LatencyMS, p.reset))
+		facts = append(facts, fmt.Sprintf("%.1f ms", v.LatencyMS))
 	}
-	if v.RoundTripMS > 0 {
-		facts = append(facts, fmt.Sprintf("round-trip %s%.2f ms%s", p.bold, v.RoundTripMS, p.reset))
-	}
-	if v.DecodedLayers > 0 {
-		facts = append(facts, fmt.Sprintf("decoded layers %s%d%s", p.bold, v.DecodedLayers, p.reset))
-	}
-	fmt.Fprintln(w, strings.Join(facts, p.dim+"  ·  "+p.reset))
+	fmt.Fprintf(w, " %s%s%s\n", p.dim, strings.Join(facts, "  ·  "), p.reset)
 
-	if v.Reason != "" {
-		title := "Why"
-		if v.Verdict != "block" {
-			title = "Notes"
-		}
-		fmt.Fprintf(w, "\n%s%s%s\n", p.bold, title, p.reset)
-		for _, r := range strings.Split(v.Reason, "; ") {
-			fmt.Fprintf(w, "  • %s\n", r)
-		}
-	}
-
-	if len(v.CategoryScores) > 0 || len(v.Categories) > 0 {
-		scores := map[string]float64{}
-		for k, s := range v.CategoryScores {
-			scores[k] = s
-		}
+	// 3. why: one line per blocking category
+	if blocked && len(v.Categories) > 0 {
+		why := reasonsByCategory(v.Reason)
+		fmt.Fprintln(w)
 		for _, c := range v.Categories {
-			if _, ok := scores[c]; !ok {
-				scores[c] = v.RiskScore
+			score := v.CategoryScores[c]
+			if score == 0 {
+				score = v.RiskScore
 			}
-		}
-		cats := make([]string, 0, len(scores))
-		for c := range scores {
-			cats = append(cats, c)
-		}
-		sort.Slice(cats, func(i, j int) bool { return scores[cats[i]] > scores[cats[j]] })
-		fmt.Fprintf(w, "\n%sCategories%s\n", p.bold, p.reset)
-		for _, c := range cats {
-			cc := p.dim
-			if scores[c] >= blockThreshold {
-				cc = p.red
-			} else if scores[c] >= 0.3 {
-				cc = p.yellow
+			text, line := why[c], ""
+			if i := strings.LastIndex(text, " (line "); i >= 0 && strings.HasSuffix(text, ")") {
+				text, line = text[:i], "L"+strings.TrimSuffix(text[i+7:], ")")
 			}
-			fmt.Fprintf(w, "  %s%-24s %s %.2f%s\n", cc, prettyCategory(c), bar(scores[c], 16, 0), scores[c], p.reset)
+			fmt.Fprintf(w, " %s%-22s%s %s%.2f%s  %-54s %s%s%s\n", p.red+p.bold, prettyCategory(c), p.reset,
+				p.bold, score, p.reset, clip(text, 54), p.dim, line, p.reset)
 		}
+	} else if blocked && v.Reason != "" { // e.g. the engine was unreachable
+		fmt.Fprintf(w, "\n %s%s%s\n", p.yellow, clip(v.Reason, 70), p.reset)
+	} else if !blocked {
+		note := "no high-risk pattern found"
+		if _, caps, ok := strings.Cut(v.Reason, "capabilities seen: "); ok {
+			note += "  " + p.dim + "(only harmless capabilities: " + clip(caps, 40) + ")" + p.reset
+		}
+		fmt.Fprintf(w, "\n %s\n", note)
 	}
 
-	if len(v.VulnerableLines) > 0 && code != "" {
+	// 4. the flagged lines themselves
+	if blocked && len(v.VulnerableLines) > 0 && code != "" {
 		lines := strings.Split(strings.ReplaceAll(code, "\r\n", "\n"), "\n")
-		fmt.Fprintf(w, "\n%sFlagged lines%s\n", p.bold, p.reset)
+		fmt.Fprintln(w)
 		for i, n := range v.VulnerableLines {
-			if i == 10 {
-				fmt.Fprintf(w, "  %s… %d more%s\n", p.dim, len(v.VulnerableLines)-10, p.reset)
+			if i == 5 {
+				fmt.Fprintf(w, " %s     … %d more flagged line(s)%s\n", p.dim, len(v.VulnerableLines)-5, p.reset)
 				break
 			}
-			if n < 1 || n > len(lines) {
-				continue
+			if n >= 1 && n <= len(lines) {
+				fmt.Fprintf(w, " %s%4d │%s %s\n", p.red, n, p.reset, clip(strings.TrimSpace(lines[n-1]), 62))
 			}
-			text := strings.TrimRight(lines[n-1], " \t")
-			if r := []rune(text); len(r) > 100 {
-				text = string(r[:100]) + "…"
-			}
-			fmt.Fprintf(w, "  %s%4d%s │ %s\n", p.red, n, p.reset, text)
 		}
 	}
+
+	// 5. what CodeGuard did
+	did := []string{"static analysis only"}
+	if v.DecodedLayers > 0 {
+		did = append(did, fmt.Sprintf("decoded %d hidden layer(s)", v.DecodedLayers))
+	}
+	if blocked {
+		did = append(did, "nothing was executed")
+	}
+	fmt.Fprintf(w, "\n %s↳ %s%s\n", p.dim, strings.Join(did, " · "), p.reset)
 	fmt.Fprintln(w, rule)
 }

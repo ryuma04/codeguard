@@ -15,6 +15,18 @@ const CATEGORY_LABEL = {
   ai_targeted_instructions: "AI-targeted instructions",
 };
 const PUBLIC_KEYS = ["verdict", "risk_score", "categories", "code_language", "reason", "vulnerable_lines"];
+// Same safe-alternative hints the CLI and the Claude Code hook give.
+const HINTS = {
+  secret_access: "Do not read credential stores, keys, tokens or secret environment variables. Take configuration as a parameter.",
+  data_exfiltration: "Do not send local data, files or environment details to external hosts. Keep results local.",
+  destructive_command: "Only delete or modify paths inside the working directory, never /, ~ or system paths.",
+  persistence_or_privesc: "Do not add startup entries, cron jobs, services, sudo/setuid or shell-profile changes.",
+  obfuscated_execution: "Write plain code. Do not decode-and-execute, eval built strings, or encode payloads.",
+  dependency_risk: "Install only well-known packages from the official index and check the spelling. No piping downloads into a shell.",
+  resource_exhaustion: "Bound every loop, recursion, thread and allocation.",
+  ssrf_network_exfil: "Only call the hosts the task names. No cloud metadata IPs, localhost admin ports or raw internal IPs.",
+  ai_targeted_instructions: "Remove comments or strings that address an AI reviewer or tell it to ignore rules or mark code safe.",
+};
 
 export default function Home() {
   const [code, setCode] = useState(EXAMPLES[1].items[0].code);
@@ -24,7 +36,10 @@ export default function Home() {
   const [health, setHealth] = useState(null);
   const [history, setHistory] = useState([]);
   const [showJson, setShowJson] = useState(false);
+  const [fixing, setFixing] = useState(null);   // the block being fixed: { categories, risk }
+  const [outcome, setOutcome] = useState(null); // "fixed" | "still" after a re-check
   const gutterRef = useRef(null);
+  const editorRef = useRef(null);
 
   const checkHealth = useCallback(async () => {
     try {
@@ -51,10 +66,38 @@ export default function Home() {
       const data = await res.json();
       setResult(data);
       setHistory((h) => [{ code, data, at: new Date().toLocaleTimeString() }, ...h].slice(0, 10));
+      if (fixing) {
+        setOutcome(data.verdict === "allow" ? "fixed" : "still");
+        if (data.verdict === "allow") setFixing(null);
+      }
     } finally {
       setBusy(false);
     }
-  }, [code]);
+  }, [code, fixing]);
+
+  // Option "Edit & re-check": put the cursor on the first flagged line; the next Analyze is the re-check.
+  const startFix = () => {
+    setFixing({ categories: result.categories, risk: result.risk_score });
+    setOutcome(null);
+    const ta = editorRef.current;
+    if (!ta) return;
+    const first = Math.min(...(result.vulnerable_lines?.length ? result.vulnerable_lines : [1]));
+    const offset = code.split("\n").slice(0, first - 1).reduce((n, l) => n + l.length + 1, 0);
+    ta.focus();
+    ta.setSelectionRange(offset, offset + (code.split("\n")[first - 1] || "").length);
+    ta.scrollTop = Math.max(0, (first - 3) * 22);
+    ta.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
+  // Option "Block": discard the code and record the decision.
+  const discard = () => {
+    setHistory((h) => [{ code, data: { ...result, verdict: "block" }, at: new Date().toLocaleTimeString(), discarded: true }, ...h].slice(0, 10));
+    setCode("");
+    setPicked(null);
+    setResult(null);
+    setFixing(null);
+    setOutcome("discarded");
+  };
 
   const onKeyDown = (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
@@ -113,6 +156,7 @@ export default function Home() {
               ))}
             </div>
             <textarea
+              ref={editorRef}
               spellCheck={false}
               value={code}
               onChange={(e) => { setCode(e.target.value); setPicked(null); }}
@@ -123,11 +167,19 @@ export default function Home() {
             />
           </div>
 
+          {fixing && (
+            <div className="notice">
+              Editing a blocked snippet ({fixing.categories.map((c) => CATEGORY_LABEL[c] || c).join(", ")}).
+              Change the highlighted lines, then press <b>Re-check</b>.
+            </div>
+          )}
+          {outcome === "discarded" && <div className="notice">Blocked by you. The code was discarded and nothing ran.</div>}
+
           <div className="toolbar">
-            <button className="btn btn-primary" onClick={analyze} disabled={busy}>
-              → {busy ? "Checking…" : "Analyze"} <kbd>Ctrl+Enter</kbd>
+            <button className="btn btn-primary" onClick={analyze} disabled={busy || !code.trim()}>
+              → {busy ? "Checking…" : fixing ? "Re-check" : "Analyze"} <kbd>Ctrl+Enter</kbd>
             </button>
-            <button className="btn btn-secondary" onClick={() => { setCode(""); setPicked(null); setResult(null); }}>Clear</button>
+            <button className="btn btn-secondary" onClick={() => { setCode(""); setPicked(null); setResult(null); setFixing(null); setOutcome(null); }}>Clear</button>
           </div>
         </section>
 
@@ -155,6 +207,15 @@ export default function Home() {
                 <span className="fact">round-trip <b>{result.roundtrip_ms} ms</b></span>
               </div>
               {result.engine_error && <div className="notice">The engine could not be reached, so this check failed closed.</div>}
+              {outcome === "fixed" && <div className="notice">Fixed: your edited version passes CodeGuard.</div>}
+              {outcome === "still" && <div className="notice">Still blocked: see the reasons and hints, then edit again.</div>}
+
+              {blocked && !result.engine_error && (
+                <div className="toolbar">
+                  <button className="btn btn-primary small" onClick={startFix}>✎ Edit &amp; re-check</button>
+                  <button className="btn btn-secondary small" onClick={discard}>⛔ Block / discard</button>
+                </div>
+              )}
 
               <div className="risk">
                 <div className="row">
@@ -195,6 +256,17 @@ export default function Home() {
                 </ul>
               )}
 
+              {blocked && result.categories.some((c) => HINTS[c]) && (
+                <>
+                  <h3>How to fix</h3>
+                  <ul className="reasons">
+                    {result.categories.filter((c) => HINTS[c]).map((c) => (
+                      <li key={c}><b>{CATEGORY_LABEL[c] || c}:</b> {HINTS[c]}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
+
               {result.vulnerable_lines?.length > 0 && (
                 <>
                   <h3>Flagged lines</h3>
@@ -224,7 +296,7 @@ export default function Home() {
             {history.map((h, i) => (
               <li key={i}>
                 <button className="rowbtn" onClick={() => { setCode(h.code); setResult(h.data); setPicked(null); }}>
-                  <span className={`tile ${h.data.verdict}`}>{h.data.verdict}</span>
+                  <span className={`tile ${h.data.verdict}`}>{h.discarded ? "you" : h.data.verdict}</span>
                   <span className="badge score">{h.data.risk_score.toFixed(2)}</span>
                   <code>{h.code.split("\n")[0].slice(0, 80)}</code>
                   <span className="when">{h.at}</span>

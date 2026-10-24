@@ -394,6 +394,7 @@ func cmdExec(args []string) int {
 	var files multiFlag
 	fs.Var(&files, "file", "file to scan before running (repeatable)")
 	card := fs.Bool("card", false, "print the full verdict card (stderr) before running")
+	noPrompt := fs.Bool("no-prompt", false, "never show the edit/block menu; a block just exits 2")
 	fs.Parse(args)
 	cmd := fs.Args()
 	if len(cmd) == 0 {
@@ -425,10 +426,12 @@ func cmdExec(args []string) int {
 
 	c := newClient(*url, *timeout)
 	p := paletteFor(os.Stderr)
+	interactive := promptAllowed(*noPrompt)
+	editedLine := "" // set when the user edited the command line itself
 	for _, it := range items {
 		var v *Verdict
 		var err error
-		if *card {
+		if *card || interactive {
 			v, err = c.analyzeDetail(it.code)
 		} else {
 			v, err = c.analyze(it.code)
@@ -438,22 +441,71 @@ func cmdExec(args []string) int {
 		}
 		if *card {
 			printCard(os.Stderr, p, v, it.code, it.name)
-			if v.Verdict != "allow" {
-				fmt.Fprintf(os.Stderr, "%scodeguard: BLOCKED, command was NOT started%s\n", p.red+p.bold, p.reset)
-				return exitBlock
+		}
+		if v.Verdict == "allow" {
+			if *card {
+				fmt.Fprintf(os.Stderr, "%scodeguard: allowed%s\n", p.green, p.reset)
+			} else {
+				fmt.Fprintf(os.Stderr, "codeguard: allow %s (risk=%.2f, %.1fms)\n", it.name, v.RiskScore, v.LatencyMS)
 			}
-			fmt.Fprintf(os.Stderr, "%scodeguard: allowed, running: %s%s\n%s\n", p.green, strings.Join(cmd, " "), p.reset, p.dim+strings.Repeat("─", 64)+p.reset)
 			continue
 		}
-		if v.Verdict != "allow" {
+		if !*card {
 			fmt.Fprintf(os.Stderr, "codeguard: BLOCKED %s, command was NOT started\n", it.name)
 			fmt.Fprintf(os.Stderr, "  risk=%.2f categories=%v lines=%v\n  reason: %s\n", v.RiskScore, v.Categories, v.VulnerableLines, v.Reason)
+		}
+		if !interactive {
+			if *card {
+				fmt.Fprintf(os.Stderr, "%scodeguard: BLOCKED, command was NOT started%s\n", p.red+p.bold, p.reset)
+			}
 			return exitBlock
 		}
-		fmt.Fprintf(os.Stderr, "codeguard: allow %s (risk=%.2f, %.1fms)\n", it.name, v.RiskScore, v.LatencyMS)
+		edited, ok := blockMenu(c, p, it.name, it.code, extFor(it.name), v)
+		if !ok {
+			fmt.Fprintf(os.Stderr, "%scodeguard: blocked by you, command was NOT started%s\n", p.red+p.bold, p.reset)
+			return exitBlock
+		}
+		if it.name == "<command line>" {
+			editedLine = edited
+			continue
+		}
+		// An edited file passed. Save it over the original, or run a temporary copy and leave the original as it was.
+		runPath := it.name
+		if readChoice(fmt.Sprintf("Save your changes to %s? [y/N] ", it.name)) == "y" {
+			if err := os.WriteFile(it.name, []byte(edited), 0o644); err != nil {
+				fmt.Fprintln(os.Stderr, "codeguard: cannot save:", err, "(blocking)")
+				return exitBlock
+			}
+		} else {
+			tmp, err := os.CreateTemp(filepath.Dir(it.name), "codeguard_edited_*"+extFor(it.name))
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "codeguard: cannot write the edited copy:", err, "(blocking)")
+				return exitBlock
+			}
+			tmp.WriteString(edited)
+			tmp.Close()
+			defer os.Remove(tmp.Name())
+			runPath = tmp.Name()
+		}
+		found := false
+		for i := range cmd {
+			if cmd[i] == it.name {
+				cmd[i], found = runPath, true
+			}
+		}
+		if !found && runPath != it.name {
+			fmt.Fprintf(os.Stderr, "codeguard: the command does not name %s directly, so only a saved version can be used (blocking)\n", it.name)
+			return exitBlock
+		}
+	}
+	if *card || interactive {
+		fmt.Fprintf(os.Stderr, "%scodeguard: running: %s%s\n%s\n", p.green, strings.Join(cmd, " "), p.reset, p.dim+strings.Repeat("─", 64)+p.reset)
 	}
 
 	child := exec.Command(cmd[0], cmd[1:]...)
+	if editedLine != "" {
+		child = shellCommand(editedLine)
+	}
 	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := child.Run(); err != nil {
 		var ee *exec.ExitError

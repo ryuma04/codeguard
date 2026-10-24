@@ -32,6 +32,20 @@ from any folder, in cmd, PowerShell or bash. Paths are relative to the folder yo
 
 Exit codes: 0 = allowed, 2 = blocked, 64 = usage error. Without `npm link`: `node scripts/codeguard.js <command>`.
 
+**When something is blocked**, every front end offers a way forward. Every edited version is checked again,
+and there is no "run anyway":
+
+| | Claude Code plugin | CLI (`codeguard run` / `exec`) | Web UI |
+|---|---|---|---|
+| Fix it automatically | "Ask Claude to fix it" | – (CodeGuard itself never calls an LLM) | – |
+| Fix it yourself | type the fix, or open it in your editor | `[e]` opens your editor, re-checks on close; then save over the original or run a temporary copy | "Edit & re-check" selects the flagged line; Re-check shows Fixed / Still blocked |
+| Block it | "Block it" (refused for the rest of the session) | `[b]` (the default) | "Block / discard" |
+| See the code | shown in the question | `[v]` numbered, flagged lines marked | flagged lines highlighted |
+
+The CLI menu only appears at an interactive terminal. In scripts, CI or with piped input it is a hard block
+(exit 2); `--no-prompt` or `CODEGUARD_NO_PROMPT=1` forces that. The editor is `CODEGUARD_EDITOR`, else VS Code,
+else `$VISUAL`/`$EDITOR`, else Notepad / nano.
+
 ### Self-healing agent loop (`codeguard/heal.py`)
 When the guard blocks code, the agent gets structured feedback (categories, flagged lines, a fix hint per
 category) and may try again. Only the exact string that was checked is ever executed.
