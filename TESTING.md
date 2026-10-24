@@ -160,6 +160,44 @@ Fixes (general, in `analyzers/python_ast.py`):
 
 Pinned by 7 new checks in `eval/regressions.py`. All other suites unchanged.
 
+## Round 7: more injection training data, and two fixes found on the way
+
+**Rule fix.** `curl … | python -c "<script>"` was blocked as "pipes remote code into an interpreter", but there the interpreter runs its own inline script and the download is only data. The rule now fires only when the downloaded text is what runs (`| python`, `| python3 -`, `| perl`, also for `wget`), not with `-c`/`-e`/`-m`/`-r`. Pinned in `eval/regressions.py`.
+
+**Plugin hook fix** (`plugin/hooks/codeguard_hook.py`, 6 new tests in `plugin/test_hook.py`, 23/23 pass):
+- For shell commands the hook used to scan *every existing file the command mentioned*, so `grep pattern codeguard/rules.py` was blocked. It now scans only files the command **runs**: an interpreter's script argument (flags and `sudo`/`env` prefixes handled), `./x.sh`, `source`, `& .\x.ps1`. `grep`/`cat`/`diff` of any file pass; `python -X utf8 demo/gate/unsafe_snippet.py` still blocks.
+- `.codeguardignore` is now read like `.gitignore`, from the file's folder up to the drive root. Before, it was only read at the project root, so it failed when Claude's root was a parent folder.
+- Writing `.codeguardignore` itself always **asks the user**; otherwise an agent could switch scanning off for itself.
+
+**Data** (`eval/injection_data.py`; hashed train/test split per source; test slices never trained on):
+
+| Source | License | Used |
+|---|---|---|
+| microsoft/llmail-inject-challenge, phase 2 labelled unique submissions (37,303) + 203 normal emails | MIT | attack_attempt True = injection, False = not; 13,796 "Unclear" dropped. Train slice: 12,785 attacks / 1,664 non-attacks; test slice: 3,090 / 443 |
+| yanismiraoui/prompt_injections (1,034, 7 languages, positives only) | Apache-2.0 | train 709 / test 325 |
+
+**Candidates, all measured through the full engine** (`eval/compare_injection.py`; injections placed in code comments/docstrings/strings):
+
+| Held-out set | A current | B +LLMail 4000 | C +LLMail+yanis | **D chosen**: +LLMail 1500, deepset×3, 40k features | E = D + yanis | G = D, deepset×6 |
+|---|---|---|---|---|---|---|
+| deepset test injections (60) | 71.7% | 48.3% | 53.3% | **68.3%** | 70.0% | 68.3% |
+| deepset test normal (56) ↓ | 1.8% | 1.8% | 1.8% | 1.8% | 0.0% | 0.0% |
+| LLMail test attacks (3,090) | 25.0% | 95.6% | 95.3% | **95.0%** | 93.8% | 95.0% |
+| LLMail test non-attacks (443) ↓ | 21.0% | 24.6% | 24.2% | 24.4% | 22.8% | 23.7% |
+| yanis test, multilingual (325) | 5.8% | 4.9% | 88.9% | 7.1% | 92.9% | 7.7% |
+| library code (659) ↓ | 0.5% | 0.6% | 0.9% | **0.5%** | 0.6% | 0.6% |
+| vulnerable code (1,721) ↓ | 2.0% | 2.0% | 2.6% | **2.0%** | 2.7% | 2.0% |
+| team benign (53) / holdout benign (30) ↓ | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+
+Why D:
+- **B/C:** 4,000 long emails crowded out the short chat-style injections (deepset fell to 48–53%). Fewer emails, more deepset weight and a bigger vocabulary fixed that.
+- **E (with yanismiraoui):** it catches multilingual injections, but its 11 extra blocks on vulnerable code are genuine false positives: ordinary strings in Ruby, Fortran and JS code.
+- **G:** adds one library-code false positive.
+
+D is the only candidate with no added false positives on real code. It loses 4 role-play prompts on deepset and gains 2. The "LLMail non-attacks" rate (21–24%) is high for every model, baseline included; those are challenge submissions the judge labelled non-attacks, many of which still read like instructions.
+
+After switching the live model to D: regressions all pass, library code 3/659, GuardDog 98/2, vulnerable code 35, team benign 0, holdout 1.00/1.00, carrier 99–100%, demo PASS, latency unchanged (p50 4.2 ms).
+
 ## What is still missed, and why
 
 - **GuardDog out-of-scope rules** (12/82 caught): screenshots, clipboard, steganography, `cmd-overwrite`, and DLL hijacking via ctypes. Their "malicious" cases are often harmless commands like `os.system("ls")` in a `setup.py`, which GuardDog flags because of *where* they run. Our task judges what the code does, so these stay allowed on purpose.

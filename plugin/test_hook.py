@@ -16,7 +16,8 @@ RUN = os.path.join(HERE, "hooks", "run.sh")
 
 
 def call(event, **env):
-    e = dict(os.environ, CLAUDE_PROJECT_DIR=ROOT, CODEGUARD_STATE_DIR=STATE, **env)
+    e = dict(os.environ, CLAUDE_PROJECT_DIR=ROOT, CODEGUARD_STATE_DIR=STATE)
+    e.update(env)
     r = subprocess.run(["sh", RUN], input=json.dumps(event).encode(), capture_output=True, env=e, timeout=30)
     out = r.stdout.decode("utf-8", "replace").strip()
     return r.returncode, (json.loads(out) if out else {})
@@ -50,11 +51,22 @@ CASES = [
     ("Edit block: whole file after edit has decode->exec",
      ev("Edit", file_path=existing, old_string="    return x", new_string="    exec(base64.b64decode(x))"), "deny"),
     ("Read: not guarded", ev("Read", file_path=existing), "pass"),
+    # Reading a file is not running it: grep/cat of the detector's own rule file must not be blocked.
+    ("Bash allow: grep reads (not runs) a file full of attack strings",
+     ev("Bash", command="grep -n secret_access codeguard/rules.py"), "pass"),
+    ("Bash allow: cat of the unsafe demo file (read only)", ev("Bash", command="cat demo/gate/unsafe_snippet.py"), "pass"),
+    ("Bash block: same file through an interpreter with flags", ev("Bash", command="python -X utf8 demo/gate/unsafe_snippet.py"), "deny"),
+    ("Bash block: sudo + interpreter still scans the file", ev("Bash", command="cd . && sudo python demo/gate/unsafe_snippet.py"), "deny"),
+    # The repo's own .codeguardignore must apply even when the project root is a parent folder.
+    ("Write ignored: repo .codeguardignore from a parent project root",
+     ev("Write", file_path=os.path.join(ROOT, "eval", "x_tmp.py"), content="rm -rf /"), "pass", {"CLAUDE_PROJECT_DIR": os.path.dirname(ROOT)}),
+    # Writing the ignore file itself must ask the user (otherwise an agent could disable scanning).
+    ("Write asks: editing .codeguardignore", ev("Write", file_path=os.path.join(work, ".codeguardignore"), content="*\n"), "ask"),
 ]
 
 ok = True
-for name, event, want in CASES:
-    code, out = call(event)
+for name, event, want, *extra in CASES:
+    code, out = call(event, **(extra[0] if extra else {}))
     got = decision(out)
     good = got == want and code == 0
     ok &= good

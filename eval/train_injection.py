@@ -1,14 +1,18 @@
 """Train the ai_targeted_instructions text classifier -> models/injection.json.
 
     python eval/external.py fetch          # once: downloads deepset/prompt-injections
-    python eval/train_injection.py
+    python eval/injection_data.py fetch    # once: LLMail-Inject + yanismiraoui (optional extra data)
+    python eval/train_injection.py [--llmail 4000] [--yanis] [--out PATH]
 
 Positives: deepset/prompt-injections TRAIN split, label 1 (Apache-2.0).
 Negatives: the same split's label 0, plus comments / docstrings / string
 literals from Python stdlib modules that are NOT used by the benign test set
 (eval/external.py PACKAGES), so the model learns what normal code prose looks like.
-The deepset TEST split is never seen here; it is used for evaluation only.
+--llmail N adds N sampled injection attempts from LLMail-Inject's TRAIN slice plus all of its
+  train-slice non-attacks and normal emails (MIT). --yanis adds yanismiraoui's TRAIN slice (Apache-2.0).
+Test slices (deepset test split, LLMail/yanis hashed test slices) are never seen here.
 """
+import argparse
 import io
 import json
 import os
@@ -55,17 +59,42 @@ def code_prose(limit=4000, seed=3):
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--llmail", type=int, default=0, help="LLMail-Inject injection attempts to sample (0 = none)")
+    ap.add_argument("--yanis", action="store_true", help="add yanismiraoui multilingual injections")
+    ap.add_argument("--out", default=textclf.MODEL_PATH, help="where to write the model JSON")
+    ap.add_argument("--max-features", type=int, default=20000, help="vocabulary size (model size grows with it)")
+    ap.add_argument("--deepset-weight", type=int, default=1,
+                    help="repeat deepset train rows N times so short direct injections are not drowned out by long emails")
+    a = ap.parse_args()
+
     with open(os.path.join(RAW, "prompt_injections.jsonl"), encoding="utf-8") as f:
         rows = [json.loads(l) for l in f if l.strip()]
-    train = [r for r in rows if r["split"] == "train"]
+    train = [r for r in rows if r["split"] == "train"] * max(1, a.deepset_weight)
     prose = code_prose()
     X = [r["text"] for r in train] + prose
     y = [int(r["label"]) for r in train] + [0] * len(prose)
     is_prose = [0] * len(train) + [1] * len(prose)
+    sources = ["deepset/prompt-injections train split (Apache-2.0)", "stdlib code prose"]
+    if a.llmail or a.yanis:
+        import injection_data
+        extra = []
+        if a.llmail:
+            lm = injection_data.llmail("train")
+            pos = [r for r in lm if r[1] == 1]
+            random.Random(7).shuffle(pos)
+            extra += pos[:a.llmail] + [r for r in lm if r[1] == 0]
+            sources.append(f"LLMail-Inject phase 2 train slice: {min(a.llmail, len(pos))} attacks + non-attacks/normal emails (MIT)")
+        if a.yanis:
+            extra += injection_data.yanis("train")
+            sources.append("yanismiraoui/prompt_injections train slice (Apache-2.0)")
+        X += [t for t, _ in extra]
+        y += [l for _, l in extra]
+        is_prose += [0] * len(extra)
     print(f"train: {sum(y)} injections, {len(y) - sum(y)} negatives ({len(prose)} from code prose)")
 
     def fit(texts, labels):
-        vec = TfidfVectorizer(analyzer=textclf.analyzer, sublinear_tf=True, min_df=2, max_features=20000)
+        vec = TfidfVectorizer(analyzer=textclf.analyzer, sublinear_tf=True, min_df=2, max_features=a.max_features)
         clf = LogisticRegression(C=4.0, class_weight="balanced", max_iter=3000)
         clf.fit(vec.fit_transform(texts), labels)
         return vec, clf
@@ -87,11 +116,11 @@ def main():
     model = {"intercept": float(clf.intercept_[0]), "threshold": round(thr, 4),
              "idf": {n: round(float(v), 4) for n, v in zip(names, vec.idf_)},
              "coef": {n: round(float(w), 4) for n, w in zip(names, clf.coef_[0]) if abs(w) > 1e-4},
-             "trained_on": len(y), "source": "deepset/prompt-injections train split (Apache-2.0) + stdlib code prose"}
-    os.makedirs(os.path.dirname(textclf.MODEL_PATH), exist_ok=True)
-    with open(textclf.MODEL_PATH, "w", encoding="utf-8") as f:
+             "trained_on": len(y), "source": " + ".join(sources)}
+    os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+    with open(a.out, "w", encoding="utf-8") as f:
         json.dump(model, f, ensure_ascii=False, separators=(",", ":"))
-    print(f"saved {os.path.normpath(textclf.MODEL_PATH)} ({os.path.getsize(textclf.MODEL_PATH) // 1024} KB, {len(names)} features)")
+    print(f"saved {os.path.normpath(a.out)} ({os.path.getsize(a.out) // 1024} KB, {len(names)} features)")
 
 
 if __name__ == "__main__":

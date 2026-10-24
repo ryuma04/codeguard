@@ -80,7 +80,7 @@ RULES = [
     ("obfuscated_execution", T, 0.65, r"getattr\(\s*(__builtins__|builtins|os|subprocess|__import__\([^)]*\))\s*,\s*[^'\")]|__import__\(\s*['\"][^'\"]+['\"]\s*\)\.(system|popen|exec|startfile|spawn)|(__dict__\s*\[\s*['\"]|__getattribute__\(\s*['\"])(system|popen|startfile|spawn\w*|exec\w*|eval|Popen|check_output|getoutput|remove|rmtree|unlink)['\"]|__import__\([^'\"\n]*[+\]]|globals\(\)\[[^\]]*\]\(|__builtins__\[|__subclasses__\(\)", "hides an import/function name at runtime"),
     ("obfuscated_execution", T, 0.60, r"\b_0x[0-9a-fA-F]{4,}\b", "JavaScript identifier mangling"),
     ("obfuscated_execution", T, 0.45, r"(\\x[0-9a-fA-F]{2}){12,}|(chr\(\d+\)\s*\+\s*){6,}|String\.fromCharCode\((\s*\d+\s*,){8,}", "long escaped/char-coded string"),
-    ("obfuscated_execution", T, 0.55, r"\bcurl\b[^\n]*\|\s*(python3?|node|perl|ruby|php)\b|\b(python3?|perl|ruby)\s+-c\s+['\"][^'\"]*(exec|eval|base64)", "pipes remote/decoded code into an interpreter"),
+    ("obfuscated_execution", T, 0.55, r"\b(curl|wget)\b[^\n]*\|\s*(python3?|node|perl|ruby|php)\b(?![^\n|;&]*\s-[a-zA-Z]*[cemrE]\b)|\b(python3?|perl|ruby)\s+-c\s+['\"][^'\"]*(exec|eval|base64)", "pipes remote/decoded code into an interpreter"),
     ("obfuscated_execution", C, 0.30, r"\b(eval|exec)\s*\(|\bcompile\(|new\s+Function\(|\bvm\.run|\bsetTimeout\(\s*['\"]", "dynamic code execution"),
 
     # ---------------- dependency_risk ----------------

