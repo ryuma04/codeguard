@@ -12,22 +12,25 @@ curl -X POST localhost:8000/analyze/batch -H "Content-Type: application/json" -d
 python -m codeguard some_file.py          # CLI, exit code 2 on block
 ```
 
-### Short commands (`npm run <task>`, from the repo root)
-`package.json` + `scripts/tasks.js` wrap the commands above (Node standard library, no dependencies; works in cmd, PowerShell and bash).
+### The `codeguard` command
+Install once from the repo root: `npm link` (Node is only the launcher; no dependencies). Then use `codeguard`
+from any folder, in cmd, PowerShell or bash. Paths are relative to the folder you are in. `codeguard help` lists everything.
 
 | Command | Does |
 |---|---|
-| `npm start` | engine + UI together (reuses a running engine; builds the CLI and installs UI deps on first run) |
-| `npm run engine` / `npm run ui` | one of them |
-| `npm run demo` | both interception proofs (decorator + Go gate) |
-| `npm run safe` / `npm run unsafe` | gate one half of the demo pair live |
-| `npm run scan -- path/to/file.py` | full verdict card for one file (never runs it): risk bar, reasons, category scores, flagged lines |
-| `npm run scan -- <files, folders or globs>` | one line per file + summary; add `-v` for a card per file |
-| `npm run scan -- -c "rm -rf /"` | scan inline code |
-| `npm run gate -- file.py` | verdict card, then run the file (python/bash/node/powershell by extension) only if allowed |
-| `npm run i` | interactive: paste a snippet and end it with `.`, or type a path; repeat |
-| `npm run check` | regressions + holdout |
-| `npm run build` / `health` / `bench` / `cg -- <any CLI args>` | build the CLI, ping the engine, latency, raw CLI |
+| `codeguard start` | engine + web UI together (reuses a running engine; builds the gate and installs UI deps on first run) |
+| `codeguard engine` / `codeguard ui` | one of them |
+| `codeguard scan file.py` | verdict card (never runs it): risk bar, reasons, category scores, flagged lines |
+| `codeguard scan <files, folders, globs>` | one line per file + summary; `-v` for a card per file |
+| `codeguard scan -c "rm -rf /"` | inline code; `--json` for the raw schema response |
+| `codeguard run file.py` | verdict card, then run the file (python/bash/node/powershell by extension) only if allowed |
+| `codeguard exec -- <command>` | gate any command |
+| `codeguard i` | interactive: paste a snippet and end it with `.`, or type a path; repeat |
+| `codeguard demo` | all three interception proofs; `demo safe` / `demo unsafe` / `demo heal` for one |
+| `codeguard test` | regressions + self-healing edge cases + holdout; `test plugin` / `test stress` |
+| `codeguard health` / `bench` / `build` | ping the engine, latency, rebuild the Go gate |
+
+Exit codes: 0 = allowed, 2 = blocked, 64 = usage error. Without `npm link`: `node scripts/codeguard.js <command>`.
 
 ### Self-healing agent loop (`codeguard/heal.py`)
 When the guard blocks code, the agent gets structured feedback (categories, flagged lines, a fix hint per
@@ -45,7 +48,7 @@ Limits stop an agent from using the guard as an oracle to learn evasions:
 - the guard down means nothing runs.
 
 Feedback never reveals detection rules. Lines carrying `ai_targeted_instructions` are redacted, so a blocked
-injection is not fed back into the agent. Proof: `npm run heal` (`demo/heal_check.py`): the scripted agent's
+injection is not fed back into the agent. Proof: `codeguard demo heal` (`demo/heal_check.py`): the scripted agent's
 first attempt is the unsafe demo snippet, which is blocked and never runs; the fixed one runs.
 Edge cases: `python eval/heal_tests.py` (26 checks). The same protections run in the Claude Code hook below,
 where the agent is a real model.
@@ -55,9 +58,9 @@ A `PreToolUse` hook checks every command, script run and file write Claude Code 
 denies malicious ones before they run, and returns the reason so Claude fixes its own code (bounded retries,
 fail closed, audit log). Install, the judging demo script and the multi-agent design: [plugin/README.md](plugin/README.md).
 ```bash
-npm run engine                 # terminal 1
+codeguard engine               # terminal 1
 claude --plugin-dir ./plugin   # terminal 2, then e.g. "Follow the setup steps in demo/claude/SETUP.md"
-npm run plugin-test            # the hook's own checks, no Claude needed
+codeguard test plugin          # the hook's own checks, no Claude needed
 ```
 
 **Step-by-step manual checks: [MANUAL_TESTING.md](MANUAL_TESTING.md).**

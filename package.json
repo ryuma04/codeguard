@@ -1,23 +1,12 @@
 {
   "name": "codeguard",
+  "version": "0.1.0",
   "private": true,
-  "description": "Short commands for CodeGuard. No dependencies; the engine is Python, the CLI is Go, the UI lives in ui/.",
+  "description": "CodeGuard command line: `npm link` once, then `codeguard help`. No dependencies; the engine is Python, the gate is Go, the UI lives in ui/.",
+  "bin": {
+    "codeguard": "scripts/codeguard.js"
+  },
   "scripts": {
-    "start": "node scripts/tasks.js start",
-    "engine": "node scripts/tasks.js engine",
-    "ui": "node scripts/tasks.js ui",
-    "build": "node scripts/tasks.js build",
-    "demo": "node scripts/tasks.js demo",
-    "heal": "node scripts/tasks.js heal",
-    "safe": "node scripts/tasks.js safe",
-    "unsafe": "node scripts/tasks.js unsafe",
-    "scan": "node scripts/tasks.js scan",
-    "gate": "node scripts/tasks.js gate",
-    "i": "node scripts/tasks.js i",
-    "health": "node scripts/tasks.js health",
-    "bench": "node scripts/tasks.js bench",
-    "check": "node scripts/tasks.js check",
-    "plugin-test": "node scripts/tasks.js plugin-test",
-    "cg": "node scripts/tasks.js cg"
+    "start": "node scripts/codeguard.js start"
   }
 }

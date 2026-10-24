@@ -33,7 +33,7 @@ RETRY_THRESHOLD = 0.4
 MAX_ATTEMPTS = 3
 SESSION_BLOCK_LIMIT = 8
 _EXCERPT = 120
-_INVISIBLE = re.compile("[​-‏ -‮⁠-⁩﻿\U000e0000-\U000e007f]")
+_INVISIBLE = re.compile("[\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff\U000e0000-\U000e007f]")
 
 HINTS = {
     "secret_access": "Do not read credential stores, keys, tokens or secret environment variables. Take configuration as a parameter.",
@@ -87,7 +87,7 @@ def _sha(code):
 
 def _excerpt(text):
     text = _INVISIBLE.sub("", text).strip()
-    return text[:_EXCERPT] + ("…" if len(text) > _EXCERPT else "")
+    return text[:_EXCERPT] + ("..." if len(text) > _EXCERPT else "")
 
 
 def build_feedback(code, result, attempt, max_attempts):

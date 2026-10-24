@@ -20,5 +20,5 @@ Present the result as a short verdict card:
 - the categories with their scores
 - each flagged line with its line number, in a code block
 
-If the engine is unreachable, say so and tell the user to start it with `npm run engine`
+If the engine is unreachable, say so and tell the user to start it with `codeguard engine`
 (or `python -m codeguard.api --port 8000`) in the CodeGuard repository.
